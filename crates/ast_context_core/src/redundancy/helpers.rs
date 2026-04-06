@@ -1,5 +1,19 @@
 use std::collections::HashSet;
 
+/// Normalize an identifier to a canonical form for comparison.
+/// Converts camelCase, PascalCase, snake_case, kebab-case all to lowercase without separators.
+/// e.g. "firstName", "first_name", "FirstName" → "firstname"
+pub(super) fn normalize_field_name(name: &str) -> String {
+    let mut result = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if ch == '_' || ch == '-' {
+            continue;
+        }
+        result.push(ch.to_ascii_lowercase());
+    }
+    result
+}
+
 /// Extract identifier-like tokens directly into a HashSet (avoids intermediate Vec).
 pub(super) fn extract_tokens_set(source: &str) -> HashSet<&str> {
     source

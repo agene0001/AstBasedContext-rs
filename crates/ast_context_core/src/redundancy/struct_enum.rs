@@ -2,7 +2,7 @@ use crate::types::node::GraphNode;
 use petgraph::graph::NodeIndex;
 use std::collections::HashSet;
 use super::context::AnalysisContext;
-use super::helpers::extract_field_names;
+use super::helpers::{extract_field_names, normalize_field_name};
 use super::types::{Tier, FindingKind, Finding};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -22,7 +22,9 @@ pub(super) fn find_overlapping_structs(
             let src = node.source_snippet()?;
             match node {
                 GraphNode::Struct(s) => {
-                    let fields: HashSet<String> = extract_field_names(src).into_iter().collect();
+                    let fields: HashSet<String> = extract_field_names(src).into_iter()
+                        .map(|f| normalize_field_name(&f))
+                        .collect();
                     if fields.len() >= 2 {
                         Some((idx, s.name.as_str(), fields))
                     } else {
@@ -30,7 +32,9 @@ pub(super) fn find_overlapping_structs(
                     }
                 }
                 GraphNode::Class(c) => {
-                    let fields: HashSet<String> = extract_field_names(src).into_iter().collect();
+                    let fields: HashSet<String> = extract_field_names(src).into_iter()
+                        .map(|f| normalize_field_name(&f))
+                        .collect();
                     if fields.len() >= 2 {
                         Some((idx, c.name.as_str(), fields))
                     } else {
@@ -60,7 +64,7 @@ pub(super) fn find_overlapping_structs(
             let union = fields_a.union(fields_b).count().max(1);
             let ratio = shared as f64 / union as f64;
 
-            if ratio >= 0.5 && shared >= 3 {
+            if ratio >= 0.5 && shared >= 2 {
                 group.push(j);
                 used[j] = true;
             }
