@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/ast_context_core", "crates/ast_context_cli", "crates/ast_context_mcp"]
+resolver = "2"
