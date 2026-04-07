@@ -173,6 +173,14 @@ enum Commands {
         /// List of checks or categories to skip (e.g. dead_code, anti_patterns). Comma-separated.
         #[arg(long = "skip-check", value_delimiter = ',')]
         skip_checks: Vec<String>,
+
+        /// Include full source code snippets in output (increases context significantly)
+        #[arg(long)]
+        include_source: bool,
+
+        /// Maximum number of findings to return per redundancy type (0 = all)
+        #[arg(long, default_value = "0")]
+        limit_per_type: usize,
     },
 
     /// Watch a directory for changes and rebuild the graph
@@ -556,6 +564,8 @@ fn main() {
             structural_threshold,
             merge_threshold,
             skip_checks,
+            include_source,
+            limit_per_type,
         } => {
             let g = load_graph(&graph);
 
@@ -582,7 +592,19 @@ fn main() {
             };
 
             let findings = redundancy::analyze(&g, &config);
-            let filtered: Vec<_> = findings.iter().filter(|f| f.tier <= min_tier).collect();
+            let mut filtered: Vec<_> = findings
+                .into_iter()
+                .filter(|f| f.tier <= min_tier)
+                .collect();
+
+            if limit_per_type > 0 {
+                let mut counts = std::collections::HashMap::new();
+                filtered.retain(|f| {
+                    let count = counts.entry(std::mem::discriminant(&f.kind)).or_insert(0);
+                    *count += 1;
+                    *count <= limit_per_type
+                });
+            }
 
             if filtered.is_empty() {
                 println!("No redundancy findings at tier {tier} or above.");
@@ -708,22 +730,32 @@ fn main() {
 
                 println!("[{tier_flag}][{initials}] {}", finding.description);
 
-                // Print source previews for involved nodes
                 for &ni in &finding.node_indices {
                     let node_idx = petgraph::graph::NodeIndex::new(ni);
                     if let Some(node) = g.get_node(node_idx) {
-                        if let Some(src) = node.source_snippet() {
-                            let preview: String = src
-                                .lines()
-                                .take(4)
-                                .map(|l| format!("      │ {l}"))
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            let total = src.lines().count();
-                            println!("    {} [{}]:", node.name(), node.label());
-                            println!("{preview}");
-                            if total > 4 {
-                                println!("      │ ... ({} more lines)", total - 4);
+                        let loc = node.location();
+                        let loc_str = if loc.0.is_empty() {
+                            "".to_string()
+                        } else if loc.1 > 0 {
+                            format!(" ({}:{})", loc.0, loc.1)
+                        } else {
+                            format!(" ({})", loc.0)
+                        };
+                        println!("    {} [{}]{loc_str}", node.name(), node.label());
+
+                        if include_source {
+                            if let Some(src) = node.source_snippet() {
+                                let preview: String = src
+                                    .lines()
+                                    .take(4)
+                                    .map(|l| format!("      │ {l}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                let total = src.lines().count();
+                                println!("{preview}");
+                                if total > 4 {
+                                    println!("      │ ... ({} more lines)", total - 4);
+                                }
                             }
                         }
                     }

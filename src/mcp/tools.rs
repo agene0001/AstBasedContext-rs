@@ -253,7 +253,15 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                         "items": { "type": "string" },
                         "description": "List of specific checks or categories to skip (e.g., ['detect_dead_code', 'anti_patterns'])"
                     },
-                    "repository": {
+                    "include_source": {
+                        "type": "boolean",
+                        "description": "Include full source code snippets in output. Significantly increases context usage. (default: false)"
+                    },
+                    "limit_per_type": {
+                        "type": "integer",
+                        "description": "Maximum number of findings to return per redundancy type (default: 0 = all)"
+                    },
+                    "limit": {
                         "type": "string",
                         "description": "Path of the indexed repository to query (optional)"
                     }
@@ -1079,6 +1087,19 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let include_source = args
+        .get("include_source")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let limit_per_type = args
+        .get("limit_per_type")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .unwrap_or(0);
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
     let repo = args.get("repository").and_then(|v| v.as_str());
 
     with_graph(state, repo, |graph| {
@@ -1109,7 +1130,19 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         }
 
         let findings = redundancy::analyze(graph, &config);
-        let filtered: Vec<_> = findings.iter().filter(|f| f.tier <= min_tier).collect();
+        let mut filtered: Vec<_> = findings
+            .into_iter()
+            .filter(|f| f.tier <= min_tier)
+            .collect();
+
+        if limit_per_type > 0 {
+            let mut counts = std::collections::HashMap::new();
+            filtered.retain(|f| {
+                let count = counts.entry(std::mem::discriminant(&f.kind)).or_insert(0);
+                *count += 1;
+                *count <= limit_per_type
+            });
+        }
 
         if filtered.is_empty() {
             return ToolResult {
@@ -1136,13 +1169,19 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
             low,
         ));
 
-        let mut current_tier = None;
-        for finding in &filtered {
-            if current_tier != Some(finding.tier) {
-                current_tier = Some(finding.tier);
-                text.push_str(&format!("══ {} ══\n\n", finding.tier));
+        let display_filtered = if let Some(l) = limit {
+            if filtered.len() > l {
+                text.push_str(&format!(
+                    "(Showing top {} findings due to limit parameter)\n\n",
+                    l
+                ));
             }
+            filtered.into_iter().take(l).collect::<Vec<_>>()
+        } else {
+            filtered
+        };
 
+        for finding in &display_filtered {
             let tag = match &finding.kind {
                 FindingKind::Passthrough { .. } => "PASSTHROUGH",
                 FindingKind::NearDuplicate { .. } => "NEAR-DUPLICATE",
@@ -1260,18 +1299,28 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                 finding.description
             ));
 
-            // Show brief source for involved nodes
             for &ni in &finding.node_indices {
                 let node_idx = petgraph::graph::NodeIndex::new(ni);
                 if let Some(node) = graph.get_node(node_idx) {
-                    if let Some(src) = node.source_snippet() {
-                        text.push_str(&format!("  {} [{}]:\n", node.name(), node.label()));
-                        for line in src.lines().take(5) {
-                            text.push_str(&format!("    │ {line}\n"));
-                        }
-                        let total = src.lines().count();
-                        if total > 5 {
-                            text.push_str(&format!("    │ ... ({} more lines)\n", total - 5));
+                    let loc = node.location();
+                    let loc_str = if loc.0.is_empty() {
+                        "".to_string()
+                    } else if loc.1 > 0 {
+                        format!(" ({}:{})", loc.0, loc.1)
+                    } else {
+                        format!(" ({})", loc.0)
+                    };
+                    text.push_str(&format!("  {} [{}]{loc_str}\n", node.name(), node.label()));
+
+                    if include_source {
+                        if let Some(src) = node.source_snippet() {
+                            for line in src.lines().take(5) {
+                                text.push_str(&format!("    │ {line}\n"));
+                            }
+                            let total = src.lines().count();
+                            if total > 5 {
+                                text.push_str(&format!("    │ ... ({} more lines)\n", total - 5));
+                            }
                         }
                     }
                 }

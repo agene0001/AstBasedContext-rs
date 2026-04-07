@@ -270,6 +270,21 @@ impl GraphNode {
     }
 
     /// Returns the name of this node.
+    pub fn location(&self) -> (String, usize, usize) {
+        match self {
+            GraphNode::Function(d) => (d.path.to_string_lossy().into_owned(), d.span.start_line as usize, d.span.end_line as usize),
+            GraphNode::Class(d) => (d.path.to_string_lossy().into_owned(), d.span.start_line as usize, d.span.end_line as usize),
+            GraphNode::Trait(d) => (d.path.to_string_lossy().into_owned(), d.span.start_line as usize, d.span.end_line as usize),
+            GraphNode::Interface(d) => (d.path.to_string_lossy().into_owned(), d.span.start_line as usize, d.span.end_line as usize),
+            GraphNode::Struct(d) => (d.path.to_string_lossy().into_owned(), d.span.start_line as usize, d.span.end_line as usize),
+            GraphNode::Enum(d) => (d.path.to_string_lossy().into_owned(), d.span.start_line as usize, d.span.end_line as usize),
+            GraphNode::Macro(d) => (d.path.to_string_lossy().into_owned(), d.line_number as usize, d.line_number as usize),
+            GraphNode::Variable(d) => (d.path.to_string_lossy().into_owned(), d.line_number as usize, d.line_number as usize),
+            GraphNode::File(d) => (d.path.to_string_lossy().into_owned(), 0, 0),
+            _ => (String::new(), 0, 0),
+        }
+    }
+
     pub fn name(&self) -> &str {
         match self {
             GraphNode::Repository(d) => &d.name,

@@ -162,13 +162,15 @@ ast_context redundancy --graph graph.json --tier high
 # Only critical
 ast_context redundancy --graph graph.json --tier critical
 
-# Tune thresholds and skip specific checks or entire categories
+# Tune thresholds, skip checks, cap findings, and include source code
 ast_context redundancy --graph graph.json \
   --split-complexity 20 --split-lines 80 \
   --near-dup-threshold 0.85 \
   --structural-threshold 0.55 \
   --merge-threshold 0.45 \
-  --skip-check detect_dead_code,data_structures
+  --skip-check detect_dead_code,data_structures \
+  --limit-per-type 5 \
+  --include-source
 ```
 
 ### Watch for changes

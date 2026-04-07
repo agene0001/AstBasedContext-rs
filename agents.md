@@ -177,13 +177,16 @@ This returns findings in 4 tiers, each with a specific finding type:
 
 ```
 # Start with just critical + high for quick wins
-analyze_redundancy { min_tier: "high", skip_checks: ["detect_dead_code"] }
+analyze_redundancy { min_tier: "high", skip_checks: ["detect_dead_code"], limit_per_type: 3 }
+
+# Include full source code (warning: high token usage!)
+analyze_redundancy { min_tier: "critical", include_source: true }
+
+# Truncate total results if the codebase is massive
+analyze_redundancy { min_tier: "high", limit: 20 }
 
 # If refactoring deeply, include medium
 analyze_redundancy { min_tier: "medium" }
-
-# Full audit
-analyze_redundancy { min_tier: "low" }
 ```
 
 **After finding redundancy, validate with the call graph**:
