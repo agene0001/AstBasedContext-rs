@@ -177,7 +177,7 @@ This returns findings in 4 tiers, each with a specific finding type:
 
 ```
 # Start with just critical + high for quick wins
-analyze_redundancy { min_tier: "high" }
+analyze_redundancy { min_tier: "high", skip_checks: ["detect_dead_code"] }
 
 # If refactoring deeply, include medium
 analyze_redundancy { min_tier: "medium" }
@@ -194,14 +194,19 @@ analyze_relationships { name: "suspected_wrapper", relationship: "callees" }
 
 If a passthrough wrapper has many callers, it may be a legitimate facade. If it has one caller, it's probably safe to inline.
 
-**Recommendation format**:
+**Compact output format**:
+The server returns extremely compact tags to save your context window.
+- Tiers: `[C]` = Critical, `[H]` = High, `[M]` = Medium, `[L]` = Low
+- Types: Initials of the finding type (e.g. `[PT]` = PASSTHROUGH, `[ND]` = NEAR-DUPLICATE, `[M]` = MERGE, `[SO]` = STRUCT-OVERLAP)
+
+**Your recommendation format back to the user**:
 ```
-[CRITICAL/PASSTHROUGH] `parse_config` → `read_settings`
+[C][PT] `parse_config` → `read_settings`
   - parse_config just forwards (path, defaults) to read_settings
   - Callers: only main() calls parse_config
   - Suggestion: Replace calls to parse_config with direct calls to read_settings
 
-[MEDIUM/MERGE] `process_csv` and `process_json`
+[M][M] `process_csv` and `process_json`
   - Share 65% of lines (validation, output, error handling)
   - Differ in: parsing logic (lines 12-25 vs 12-30)
   - Suggestion: Extract shared logic into process_data(parser: impl Parser)

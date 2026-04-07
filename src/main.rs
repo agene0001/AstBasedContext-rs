@@ -9,7 +9,11 @@ mod mcp;
 mod setup;
 
 #[derive(Parser)]
-#[command(name = "ast-context", version, about = "Build code graphs from AST/CST analysis")]
+#[command(
+    name = "ast-context",
+    version,
+    about = "Build code graphs from AST/CST analysis"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -165,6 +169,10 @@ enum Commands {
         /// Shared line ratio for merge candidates (0.0-1.0)
         #[arg(long, default_value = "0.40")]
         merge_threshold: f64,
+
+        /// List of checks or categories to skip (e.g. dead_code, anti_patterns). Comma-separated.
+        #[arg(long = "skip-check", value_delimiter = ',')]
+        skip_checks: Vec<String>,
     },
 
     /// Watch a directory for changes and rebuild the graph
@@ -227,7 +235,13 @@ fn main() {
             if skip_tests {
                 eprintln!("Skipping test files.");
             }
-            let graph = match GraphBuilder::build_full_with_options(&path, annotate, &exclude, Some(max_file_size * 1024 * 1024), skip_tests) {
+            let graph = match GraphBuilder::build_full_with_options(
+                &path,
+                annotate,
+                &exclude,
+                Some(max_file_size * 1024 * 1024),
+                skip_tests,
+            ) {
                 Ok(g) => g,
                 Err(e) => {
                     eprintln!("Error building graph: {e}");
@@ -253,7 +267,11 @@ fn main() {
                         eprintln!("Error exporting JSONL: {e}");
                         process::exit(1);
                     }
-                    eprintln!("Exported to {}/nodes.jsonl and {}/edges.jsonl", out.display(), out.display());
+                    eprintln!(
+                        "Exported to {}/nodes.jsonl and {}/edges.jsonl",
+                        out.display(),
+                        out.display()
+                    );
                 }
                 _ => {
                     eprintln!("Unknown format: {format}. Use: stats, json, jsonl");
@@ -298,10 +316,7 @@ fn main() {
                 process::exit(1);
             }
 
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
             let parser = match parser::parser_for_extension(ext) {
                 Some(p) => p,
@@ -423,7 +438,9 @@ fn main() {
                 }
                 _ => {
                     eprintln!("Unknown relationship: {relationship}");
-                    eprintln!("Use: callers, callees, inheritance, call_chain, implementors, children");
+                    eprintln!(
+                        "Use: callers, callees, inheritance, call_chain, implementors, children"
+                    );
                     process::exit(1);
                 }
             }
@@ -488,7 +505,10 @@ fn main() {
                 return;
             }
 
-            println!("Found {} groups of potentially similar code:\n", groups.len());
+            println!(
+                "Found {} groups of potentially similar code:\n",
+                groups.len()
+            );
             for (i, group) in groups.iter().enumerate() {
                 println!("── Group {} ({} nodes) ──", i + 1, group.len());
                 for (_, node) in group {
@@ -535,6 +555,7 @@ fn main() {
             near_dup_threshold,
             structural_threshold,
             merge_threshold,
+            skip_checks,
         } => {
             let g = load_graph(&graph);
 
@@ -556,14 +577,12 @@ fn main() {
                 near_duplicate_threshold: near_dup_threshold,
                 structural_threshold,
                 merge_threshold,
+                skip_checks,
                 ..Default::default()
             };
 
             let findings = redundancy::analyze(&g, &config);
-            let filtered: Vec<_> = findings
-                .iter()
-                .filter(|f| f.tier <= min_tier)
-                .collect();
+            let filtered: Vec<_> = findings.iter().filter(|f| f.tier <= min_tier).collect();
 
             if filtered.is_empty() {
                 println!("No redundancy findings at tier {tier} or above.");
@@ -571,13 +590,7 @@ fn main() {
                 return;
             }
 
-            let mut current_tier = None;
             for finding in &filtered {
-                if current_tier != Some(finding.tier) {
-                    current_tier = Some(finding.tier);
-                    println!("\n══ {} ══\n", finding.tier);
-                }
-
                 // Print kind tag
                 use redundancy::FindingKind;
                 let tag = match &finding.kind {
@@ -685,7 +698,15 @@ fn main() {
                     FindingKind::TechDebtComment { .. } => "TECH-DEBT",
                 };
 
-                println!("  [{tag}] {}", finding.description);
+                let tier_flag = match finding.tier {
+                    redundancy::Tier::Critical => "C",
+                    redundancy::Tier::High => "H",
+                    redundancy::Tier::Medium => "M",
+                    redundancy::Tier::Low => "L",
+                };
+                let initials: String = tag.split('-').filter_map(|s| s.chars().next()).collect();
+
+                println!("[{tier_flag}][{initials}] {}", finding.description);
 
                 // Print source previews for involved nodes
                 for &ni in &finding.node_indices {
@@ -713,20 +734,40 @@ fn main() {
             println!(
                 "Total: {} findings ({} critical, {} high, {} medium, {} low)",
                 filtered.len(),
-                filtered.iter().filter(|f| f.tier == redundancy::Tier::Critical).count(),
-                filtered.iter().filter(|f| f.tier == redundancy::Tier::High).count(),
-                filtered.iter().filter(|f| f.tier == redundancy::Tier::Medium).count(),
-                filtered.iter().filter(|f| f.tier == redundancy::Tier::Low).count(),
+                filtered
+                    .iter()
+                    .filter(|f| f.tier == redundancy::Tier::Critical)
+                    .count(),
+                filtered
+                    .iter()
+                    .filter(|f| f.tier == redundancy::Tier::High)
+                    .count(),
+                filtered
+                    .iter()
+                    .filter(|f| f.tier == redundancy::Tier::Medium)
+                    .count(),
+                filtered
+                    .iter()
+                    .filter(|f| f.tier == redundancy::Tier::Low)
+                    .count(),
             );
         }
 
-        Commands::Watch { path, debounce, exclude: _exclude } => {
+        Commands::Watch {
+            path,
+            debounce,
+            exclude: _exclude,
+        } => {
             if !path.exists() {
                 eprintln!("Error: path does not exist: {}", path.display());
                 process::exit(1);
             }
 
-            eprintln!("Watching {} for changes (debounce: {}ms)...", path.display(), debounce);
+            eprintln!(
+                "Watching {} for changes (debounce: {}ms)...",
+                path.display(),
+                debounce
+            );
             eprintln!("Press Ctrl+C to stop.");
 
             let mut watcher = match FileWatcher::start(&path, Some(debounce)) {

@@ -221,7 +221,9 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             name: "analyze_redundancy".to_string(),
             description: "Run tiered redundancy analysis: finds passthrough wrappers, near-duplicates, \
                 structural similarity, merge candidates, and split candidates. Returns findings ranked \
-                Critical > High > Medium > Low. Requires annotate=true on index.".to_string(),
+                Critical > High > Medium > Low. \
+                Output uses compact tags for Tiers ([C], [H], [M], [L]) and Type Initials (e.g. [PT]=PASSTHROUGH, [ND]=NEAR-DUPLICATE). \
+                Requires annotate=true on index.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -245,6 +247,11 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                     "merge_threshold": {
                         "type": "number",
                         "description": "Shared line ratio for merge candidates 0.0-1.0 (default: 0.40)"
+                    },
+                    "skip_checks": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "List of specific checks or categories to skip (e.g., ['detect_dead_code', 'anti_patterns'])"
                     },
                     "repository": {
                         "type": "string",
@@ -370,11 +377,7 @@ pub fn list_tools() -> Vec<ToolDefinition> {
 }
 
 /// Dispatch a tool call to its handler.
-pub fn handle_tool(
-    state: &SharedState,
-    tool_name: &str,
-    args: &serde_json::Value,
-) -> ToolResult {
+pub fn handle_tool(state: &SharedState, tool_name: &str, args: &serde_json::Value) -> ToolResult {
     match tool_name {
         "index_directory" => handle_index_directory(state, args),
         "find_code" => handle_find_code(state, args),
@@ -413,7 +416,9 @@ fn handle_index_directory(state: &SharedState, args: &serde_json::Value) -> Tool
     let path = PathBuf::from(path_str);
     if !path.exists() {
         return ToolResult {
-            content: vec![ToolContent::text(format!("Path does not exist: {path_str}"))],
+            content: vec![ToolContent::text(format!(
+                "Path does not exist: {path_str}"
+            ))],
             is_error: Some(true),
         };
     }
@@ -455,10 +460,17 @@ fn handle_index_directory(state: &SharedState, args: &serde_json::Value) -> Tool
     if !force_reindex && cache_path.exists() {
         let stale = !cache_is_fresh(&canonical, &cache_path);
         if stale {
-            log::info!("Source files changed since last index, re-indexing {}", canonical.display());
+            log::info!(
+                "Source files changed since last index, re-indexing {}",
+                canonical.display()
+            );
         } else {
             // load_with_config rejects the cache if annotate or exclude patterns changed.
-            match crate::graph::CodeGraph::load_with_config(&cache_path, Some(annotate), Some(&exclude)) {
+            match crate::graph::CodeGraph::load_with_config(
+                &cache_path,
+                Some(annotate),
+                Some(&exclude),
+            ) {
                 Ok(graph) => {
                     let node_count = graph.node_count();
                     let edge_count = graph.edge_count();
@@ -478,13 +490,23 @@ fn handle_index_directory(state: &SharedState, args: &serde_json::Value) -> Tool
                 }
                 Err(e) => {
                     // Cache stale, config mismatch, or version-mismatched — fall through to re-index.
-                    log::info!("Cache invalid ({}), re-indexing: {}", cache_path.display(), e);
+                    log::info!(
+                        "Cache invalid ({}), re-indexing: {}",
+                        cache_path.display(),
+                        e
+                    );
                 }
             }
         }
     }
 
-    match GraphBuilder::build_full_with_options(&canonical, annotate, &exclude, max_file_size, skip_tests) {
+    match GraphBuilder::build_full_with_options(
+        &canonical,
+        annotate,
+        &exclude,
+        max_file_size,
+        skip_tests,
+    ) {
         Ok(graph) => {
             let node_count = graph.node_count();
             let edge_count = graph.edge_count();
@@ -570,7 +592,9 @@ fn handle_find_code(state: &SharedState, args: &serde_json::Value) -> ToolResult
         Some(q) => q,
         None => {
             return ToolResult {
-                content: vec![ToolContent::text("Missing required parameter: query".into())],
+                content: vec![ToolContent::text(
+                    "Missing required parameter: query".into(),
+                )],
                 is_error: Some(true),
             }
         }
@@ -680,7 +704,11 @@ fn handle_get_file_summary(state: &SharedState, args: &serde_json::Value) -> Too
             _ => file_path.to_string(),
         };
 
-        let mut text = format!("Symbols in {} ({} found):\n\n", canonical_path, matches.len());
+        let mut text = format!(
+            "Symbols in {} ({} found):\n\n",
+            canonical_path,
+            matches.len()
+        );
         for node in &matches {
             text.push_str(&format_node(node));
             text.push('\n');
@@ -714,10 +742,7 @@ fn handle_analyze_relationships(state: &SharedState, args: &serde_json::Value) -
             }
         }
     };
-    let max_depth = args
-        .get("max_depth")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(5) as usize;
+    let max_depth = args.get("max_depth").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
     let repo = args.get("repository").and_then(|v| v.as_str());
 
     with_graph(state, repo, |graph| {
@@ -741,7 +766,9 @@ fn handle_analyze_relationships(state: &SharedState, args: &serde_json::Value) -
 
         if indices.is_empty() {
             return ToolResult {
-                content: vec![ToolContent::text(format!("No node found with name '{name}'"))],
+                content: vec![ToolContent::text(format!(
+                    "No node found with name '{name}'"
+                ))],
                 is_error: None,
             };
         }
@@ -831,10 +858,7 @@ fn handle_analyze_relationships(state: &SharedState, args: &serde_json::Value) -
 }
 
 fn handle_find_dead_code(state: &SharedState, args: &serde_json::Value) -> ToolResult {
-    let limit = args
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(50) as usize;
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
     let repo = args.get("repository").and_then(|v| v.as_str());
 
     with_graph(state, repo, |graph| {
@@ -860,10 +884,7 @@ fn handle_find_dead_code(state: &SharedState, args: &serde_json::Value) -> ToolR
 }
 
 fn handle_find_complex_functions(state: &SharedState, args: &serde_json::Value) -> ToolResult {
-    let limit = args
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(20) as usize;
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
     let repo = args.get("repository").and_then(|v| v.as_str());
 
     with_graph(state, repo, |graph| {
@@ -877,7 +898,10 @@ fn handle_find_complex_functions(state: &SharedState, args: &serde_json::Value) 
 
         let mut text = format!("Most complex functions (top {}):\n\n", funcs.len());
         for (_, node, complexity) in &funcs {
-            text.push_str(&format!("  complexity={complexity}  {}\n", format_node_brief(node)));
+            text.push_str(&format!(
+                "  complexity={complexity}  {}\n",
+                format_node_brief(node)
+            ));
         }
 
         ToolResult {
@@ -913,7 +937,8 @@ fn handle_get_stats(state: &SharedState, args: &serde_json::Value) -> ToolResult
     if graphs_to_show.is_empty() {
         return ToolResult {
             content: vec![ToolContent::text(format!(
-                "No indexed repository matching '{}'.", repo.unwrap_or("")
+                "No indexed repository matching '{}'.",
+                repo.unwrap_or("")
             ))],
             is_error: Some(true),
         };
@@ -926,8 +951,7 @@ fn handle_get_stats(state: &SharedState, args: &serde_json::Value) -> ToolResult
         text.push_str(&format!("  Edges: {}\n", graph.edge_count()));
         text.push_str(&format!("  Annotated: {}\n", graph.has_annotations()));
 
-        let mut counts: std::collections::HashMap<&str, usize> =
-            std::collections::HashMap::new();
+        let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for idx in graph.graph.node_indices() {
             let label = graph.graph[idx].label();
             *counts.entry(label).or_default() += 1;
@@ -974,10 +998,7 @@ fn handle_list_repositories(state: &SharedState) -> ToolResult {
 
 fn handle_find_similar(state: &SharedState, args: &serde_json::Value) -> ToolResult {
     let kind = args.get("kind").and_then(|v| v.as_str());
-    let min_lines = args
-        .get("min_lines")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(5) as usize;
+    let min_lines = args.get("min_lines").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
     let repo = args.get("repository").and_then(|v| v.as_str());
 
     with_graph(state, repo, |graph| {
@@ -1001,7 +1022,11 @@ fn handle_find_similar(state: &SharedState, args: &serde_json::Value) -> ToolRes
         for (i, group) in groups.iter().enumerate().take(20) {
             text.push_str(&format!("── Group {} ({} nodes) ──\n", i + 1, group.len()));
             for (_, node) in group {
-                text.push_str(&format!("  [{}] {}\n", node.label(), format_node_brief(node)));
+                text.push_str(&format!(
+                    "  [{}] {}\n",
+                    node.label(),
+                    format_node_brief(node)
+                ));
                 if let Some(src) = node.source_snippet() {
                     // Show first 8 lines as preview
                     for line in src.lines().take(8) {
@@ -1030,20 +1055,30 @@ fn handle_find_similar(state: &SharedState, args: &serde_json::Value) -> ToolRes
 fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> ToolResult {
     use crate::redundancy::{self, AnalysisConfig, FindingKind, Tier};
 
-    let min_tier = match args.get("min_tier").and_then(|v| v.as_str()).unwrap_or("low") {
+    let min_tier = match args
+        .get("min_tier")
+        .and_then(|v| v.as_str())
+        .unwrap_or("low")
+    {
         "critical" => Tier::Critical,
         "high" => Tier::High,
         "medium" => Tier::Medium,
         _ => Tier::Low,
     };
-    let min_lines = args
-        .get("min_lines")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(3) as usize;
+    let min_lines = args.get("min_lines").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
 
     let near_dup = args.get("near_dup_threshold").and_then(|v| v.as_f64());
     let structural = args.get("structural_threshold").and_then(|v| v.as_f64());
     let merge = args.get("merge_threshold").and_then(|v| v.as_f64());
+    let skip_checks = args
+        .get("skip_checks")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let repo = args.get("repository").and_then(|v| v.as_str());
 
     with_graph(state, repo, |graph| {
@@ -1060,11 +1095,18 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
 
         let mut config = AnalysisConfig {
             min_lines,
+            skip_checks,
             ..Default::default()
         };
-        if let Some(v) = near_dup { config.near_duplicate_threshold = v; }
-        if let Some(v) = structural { config.structural_threshold = v; }
-        if let Some(v) = merge { config.merge_threshold = v; }
+        if let Some(v) = near_dup {
+            config.near_duplicate_threshold = v;
+        }
+        if let Some(v) = structural {
+            config.structural_threshold = v;
+        }
+        if let Some(v) = merge {
+            config.merge_threshold = v;
+        }
 
         let findings = redundancy::analyze(graph, &config);
         let filtered: Vec<_> = findings.iter().filter(|f| f.tier <= min_tier).collect();
@@ -1087,7 +1129,11 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
 
         text.push_str(&format!(
             "Redundancy Analysis: {} findings ({} critical, {} high, {} medium, {} low)\n\n",
-            filtered.len(), critical, high, medium, low,
+            filtered.len(),
+            critical,
+            high,
+            medium,
+            low,
         ));
 
         let mut current_tier = None;
@@ -1202,7 +1248,17 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                 FindingKind::TechDebtComment { .. } => "TECH-DEBT",
             };
 
-            text.push_str(&format!("[{tag}] {}\n", finding.description));
+            let tier_flag = match finding.tier {
+                Tier::Critical => "C",
+                Tier::High => "H",
+                Tier::Medium => "M",
+                Tier::Low => "L",
+            };
+            let initials: String = tag.split('-').filter_map(|s| s.chars().next()).collect();
+            text.push_str(&format!(
+                "[{tier_flag}][{initials}] {}\n",
+                finding.description
+            ));
 
             // Show brief source for involved nodes
             for &ni in &finding.node_indices {
@@ -1241,20 +1297,18 @@ fn handle_save_graph(state: &SharedState, args: &serde_json::Value) -> ToolResul
         }
     };
 
-    with_any_graph(state, |graph| {
-        match graph.save(&save_path) {
-            Ok(()) => ToolResult {
-                content: vec![ToolContent::text(format!(
-                    "Graph saved to {}.\nReload next session with load_graph.",
-                    save_path.display()
-                ))],
-                is_error: None,
-            },
-            Err(e) => ToolResult {
-                content: vec![ToolContent::text(format!("Failed to save graph: {e}"))],
-                is_error: Some(true),
-            },
-        }
+    with_any_graph(state, |graph| match graph.save(&save_path) {
+        Ok(()) => ToolResult {
+            content: vec![ToolContent::text(format!(
+                "Graph saved to {}.\nReload next session with load_graph.",
+                save_path.display()
+            ))],
+            is_error: None,
+        },
+        Err(e) => ToolResult {
+            content: vec![ToolContent::text(format!("Failed to save graph: {e}"))],
+            is_error: Some(true),
+        },
     })
 }
 
@@ -1286,7 +1340,11 @@ fn handle_load_graph(state: &SharedState, args: &serde_json::Value) -> ToolResul
                     key.display(),
                     node_count,
                     edge_count,
-                    if annotated { ", annotated (source snippets available)" } else { "" },
+                    if annotated {
+                        ", annotated (source snippets available)"
+                    } else {
+                        ""
+                    },
                 ))],
                 is_error: None,
             }
@@ -1326,7 +1384,9 @@ fn handle_get_source(state: &SharedState, args: &serde_json::Value) -> ToolResul
 
         if filtered.is_empty() {
             return ToolResult {
-                content: vec![ToolContent::text(format!("No symbol found matching '{name}'"))],
+                content: vec![ToolContent::text(format!(
+                    "No symbol found matching '{name}'"
+                ))],
                 is_error: None,
             };
         }
@@ -1385,7 +1445,9 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
 
         if filtered.is_empty() {
             return ToolResult {
-                content: vec![ToolContent::text(format!("No symbol found matching '{name}'"))],
+                content: vec![ToolContent::text(format!(
+                    "No symbol found matching '{name}'"
+                ))],
                 is_error: None,
             };
         }
@@ -1400,7 +1462,9 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
         if let Some(src) = node.source_snippet() {
             text.push_str("```\n");
             text.push_str(src);
-            if !src.ends_with('\n') { text.push('\n'); }
+            if !src.ends_with('\n') {
+                text.push('\n');
+            }
             text.push_str("```\n");
         } else {
             text.push_str("  (re-index with annotate=true to include source)\n");
@@ -1444,7 +1508,10 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
             if let Some(group) = my_group {
                 let others: Vec<_> = group.iter().filter(|(i, _)| i != idx).collect();
                 if !others.is_empty() {
-                    text.push_str(&format!("── Similar code ({} match(es)) ──\n", others.len()));
+                    text.push_str(&format!(
+                        "── Similar code ({} match(es)) ──\n",
+                        others.len()
+                    ));
                     for (_, n) in others.iter().take(5) {
                         text.push_str(&format!("  {}\n", format_node_brief(n)));
                     }
@@ -1483,7 +1550,9 @@ fn handle_find_references(state: &SharedState, args: &serde_json::Value) -> Tool
         let results = graph.search_by_name(name);
         if results.is_empty() {
             return ToolResult {
-                content: vec![ToolContent::text(format!("No symbol found matching '{name}'"))],
+                content: vec![ToolContent::text(format!(
+                    "No symbol found matching '{name}'"
+                ))],
                 is_error: None,
             };
         }
@@ -1503,7 +1572,8 @@ fn handle_find_references(state: &SharedState, args: &serde_json::Value) -> Tool
         text.push('\n');
 
         // INHERITS edges (reverse) — who inherits from this
-        let inheritors = graph.incoming_edges(*idx)
+        let inheritors = graph
+            .incoming_edges(*idx)
             .into_iter()
             .filter(|(_, k)| matches!(k, EdgeKind::Inherits))
             .filter_map(|(src, _)| graph.get_node(src))
@@ -1527,7 +1597,8 @@ fn handle_find_references(state: &SharedState, args: &serde_json::Value) -> Tool
         }
 
         // IMPORTS edges (reverse) — which files import this symbol
-        let importers = graph.incoming_edges(*idx)
+        let importers = graph
+            .incoming_edges(*idx)
             .into_iter()
             .filter(|(_, k)| matches!(k, EdgeKind::Imports { .. }))
             .filter_map(|(src, _)| graph.get_node(src))
@@ -1541,7 +1612,8 @@ fn handle_find_references(state: &SharedState, args: &serde_json::Value) -> Tool
         }
 
         // TESTS edges (reverse) — test functions that test this
-        let testers = graph.incoming_edges(*idx)
+        let testers = graph
+            .incoming_edges(*idx)
             .into_iter()
             .filter(|(_, k)| matches!(k, EdgeKind::Tests))
             .filter_map(|(src, _)| graph.get_node(src))
@@ -1554,8 +1626,8 @@ fn handle_find_references(state: &SharedState, args: &serde_json::Value) -> Tool
             text.push('\n');
         }
 
-        let total = callers.len() + inheritors.len() + implementors.len()
-            + importers.len() + testers.len();
+        let total =
+            callers.len() + inheritors.len() + implementors.len() + importers.len() + testers.len();
         if total == 0 {
             text.push_str("No references found — symbol may be unused or an entry point.\n");
         }
@@ -1624,7 +1696,11 @@ fn handle_get_module_overview(state: &SharedState, args: &serde_json::Value) -> 
         let file_paths: std::collections::HashSet<_> = files
             .iter()
             .filter_map(|(_, n)| {
-                if let GraphNode::File(f) = n { Some(f.path.clone()) } else { None }
+                if let GraphNode::File(f) = n {
+                    Some(f.path.clone())
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -1664,7 +1740,8 @@ fn handle_get_module_overview(state: &SharedState, args: &serde_json::Value) -> 
                 for (child_idx, _) in graph.get_children(*file_idx) {
                     for (callee_idx, _) in graph.get_callees_of(child_idx) {
                         // Find which file the callee belongs to
-                        let callee_file = graph.incoming_edges(callee_idx)
+                        let callee_file = graph
+                            .incoming_edges(callee_idx)
                             .into_iter()
                             .find(|(_, k)| matches!(k, EdgeKind::Contains))
                             .and_then(|(src, _)| graph.get_node(src));
@@ -1760,9 +1837,23 @@ fn any_source_newer(
 fn is_source_file(path: &std::path::Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()).unwrap_or(""),
-        "rs" | "py" | "js" | "ts" | "tsx" | "jsx"
-            | "go" | "java" | "c" | "h" | "cpp" | "hpp" | "cc" | "cxx"
-            | "cs" | "rb" | "php" | "phtml"
+        "rs" | "py"
+            | "js"
+            | "ts"
+            | "tsx"
+            | "jsx"
+            | "go"
+            | "java"
+            | "c"
+            | "h"
+            | "cpp"
+            | "hpp"
+            | "cc"
+            | "cxx"
+            | "cs"
+            | "rb"
+            | "php"
+            | "phtml"
     )
 }
 
@@ -1879,11 +1970,15 @@ fn format_node(node: &GraphNode) -> String {
 
 fn format_node_brief(node: &GraphNode) -> String {
     match node {
-        GraphNode::Function(f) => format!("{} ({}:{})", f.name, f.path.display(), f.span.start_line),
+        GraphNode::Function(f) => {
+            format!("{} ({}:{})", f.name, f.path.display(), f.span.start_line)
+        }
         GraphNode::Class(c) => format!("{} ({}:{})", c.name, c.path.display(), c.span.start_line),
         GraphNode::Struct(s) => format!("{} ({}:{})", s.name, s.path.display(), s.span.start_line),
         GraphNode::Trait(t) => format!("{} ({}:{})", t.name, t.path.display(), t.span.start_line),
-        GraphNode::Interface(i) => format!("{} ({}:{})", i.name, i.path.display(), i.span.start_line),
+        GraphNode::Interface(i) => {
+            format!("{} ({}:{})", i.name, i.path.display(), i.span.start_line)
+        }
         GraphNode::Enum(e) => format!("{} ({}:{})", e.name, e.path.display(), e.span.start_line),
         GraphNode::Variable(v) => format!("{} ({}:{})", v.name, v.path.display(), v.line_number),
         _ => format!("{} [{}]", node.name(), node.label()),

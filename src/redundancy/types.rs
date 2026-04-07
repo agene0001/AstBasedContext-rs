@@ -38,16 +38,10 @@ pub enum FindingKind {
     },
 
     /// Near-identical source code after whitespace/name normalization.
-    NearDuplicate {
-        names: Vec<String>,
-        similarity: f64,
-    },
+    NearDuplicate { names: Vec<String>, similarity: f64 },
 
     /// Structurally similar (shared tokens, similar shape).
-    StructurallySimilar {
-        names: Vec<String>,
-        similarity: f64,
-    },
+    StructurallySimilar { names: Vec<String>, similarity: f64 },
 
     /// Two functions share a common core but differ in specific sections —
     /// could be merged with a parameter/enum to select behavior.
@@ -67,7 +61,6 @@ pub enum FindingKind {
     },
 
     // ── Struct / Enum redundancy ─────────────────────────────────────────
-
     /// Structs with heavily overlapping field names.
     OverlappingStructs {
         names: Vec<String>,
@@ -83,7 +76,6 @@ pub enum FindingKind {
     },
 
     // ── Design improvement suggestions ───────────────────────────────────
-
     /// Multiple functions share 4+ parameters — suggest grouping into a struct.
     SuggestParameterStruct {
         function_names: Vec<String>,
@@ -105,7 +97,6 @@ pub enum FindingKind {
     },
 
     // ── Architecture pattern suggestions ──────────────────────────────────
-
     /// External modules call many internal functions of a module directly —
     /// a facade would simplify the interface.
     SuggestFacade {
@@ -168,7 +159,6 @@ pub enum FindingKind {
     },
 
     // ── Anti-pattern detection ────────────────────────────────────────────
-
     /// A class or module has too many methods/functions — it's doing too much.
     GodClass {
         name: String,
@@ -177,9 +167,7 @@ pub enum FindingKind {
     },
 
     /// Circular dependency between modules (files/directories import each other).
-    CircularDependency {
-        cycle: Vec<String>,
-    },
+    CircularDependency { cycle: Vec<String> },
 
     /// A function calls more methods on another class than on its own —
     /// it may belong in the other class.
@@ -200,12 +188,9 @@ pub enum FindingKind {
     },
 
     // ── Pattern detection (enabled by type/visibility enrichment) ─────────
-
     /// Class has a private constructor, a static field of its own type,
     /// and a static accessor method — classic singleton.
-    DetectedSingleton {
-        class_name: String,
-    },
+    DetectedSingleton { class_name: String },
 
     /// Class implements an interface and wraps a different type via a field,
     /// delegating methods to it — adapter pattern.
@@ -246,12 +231,8 @@ pub enum FindingKind {
     },
 
     // ── Additional anti-patterns ─────────────────────────────────────────
-
     /// Function/method is never called by anything in the graph.
-    DeadCode {
-        name: String,
-        file_path: String,
-    },
+    DeadCode { name: String, file_path: String },
 
     /// Function takes too many parameters (6+).
     LongParameterList {
@@ -307,7 +288,6 @@ pub enum FindingKind {
     },
 
     // ── Additional pattern detection ─────────────────────────────────────
-
     /// Classes with accept(visitor) + visitor classes with visit_X methods.
     DetectedVisitor {
         visitor_name: String,
@@ -315,9 +295,7 @@ pub enum FindingKind {
     },
 
     /// Class implementing next/has_next or __iter__/__next__.
-    DetectedIterator {
-        class_name: String,
-    },
+    DetectedIterator { class_name: String },
 
     /// Like Strategy but state object holds a reference to its own interface type.
     DetectedState {
@@ -345,7 +323,6 @@ pub enum FindingKind {
     },
 
     // ── Structural / architecture quality ────────────────────────────────
-
     /// A file that imports from 10+ other files — potential bottleneck.
     HubModule {
         file_name: String,
@@ -359,7 +336,6 @@ pub enum FindingKind {
     },
 
     // ── Additional anti-patterns (batch 2) ───────────────────────────────
-
     /// One file has functions called by many different unrelated modules —
     /// it changes for many different reasons.
     DivergentChange {
@@ -395,7 +371,6 @@ pub enum FindingKind {
     },
 
     // ── Additional pattern detection (batch 2) ───────────────────────────
-
     /// Static map/dict field + method returning cached instances — flyweight.
     DetectedFlyweight {
         class_name: String,
@@ -427,7 +402,6 @@ pub enum FindingKind {
     },
 
     // ── Structural quality (batch 2) ─────────────────────────────────────
-
     /// Functions in the same class/module using different naming conventions.
     InconsistentNaming {
         scope_name: String,
@@ -436,12 +410,9 @@ pub enum FindingKind {
     },
 
     /// Circular dependency at the directory/package level.
-    CircularPackageDependency {
-        cycle: Vec<String>,
-    },
+    CircularPackageDependency { cycle: Vec<String> },
 
     // ── Type system suggestions ──────────────────────────────────────────
-
     /// Class uses a string/int `type`/`kind`/`tag` field with branching —
     /// should be an enum / sum type with variants.
     SuggestSumType {
@@ -487,7 +458,6 @@ pub enum FindingKind {
     },
 
     // ── Additional anti-patterns (batch 3) ───────────────────────────────
-
     /// Class with only getters/setters, no real behavior.
     AnemicDomainModel {
         class_name: String,
@@ -508,9 +478,7 @@ pub enum FindingKind {
     },
 
     /// try/catch with empty error handler.
-    EmptyCatch {
-        function_name: String,
-    },
+    EmptyCatch { function_name: String },
 
     /// Deeply nested callbacks/closures (3+ levels).
     CallbackHell {
@@ -525,7 +493,6 @@ pub enum FindingKind {
     },
 
     // ── Metrics ──────────────────────────────────────────────────────────
-
     /// Low cohesion — methods in a class don't share instance fields.
     LackOfCohesion {
         class_name: String,
@@ -548,13 +515,9 @@ pub enum FindingKind {
     },
 
     /// High cognitive complexity — deeply nested, hard to understand.
-    HighCognitiveComplexity {
-        function_name: String,
-        score: u32,
-    },
+    HighCognitiveComplexity { function_name: String, score: u32 },
 
     // ── Composite Risk Score ────────────────────────────────────────────
-
     /// Function with a high composite risk score across multiple dimensions.
     HighRiskFunction {
         name: String,
@@ -570,7 +533,6 @@ pub enum FindingKind {
     },
 
     // ── Test Coverage Gaps ──────────────────────────────────────────────
-
     /// Public function with no test coverage.
     UntestedPublicFunction {
         function_name: String,
@@ -593,7 +555,6 @@ pub enum FindingKind {
     },
 
     // ── Change Blast Radius ─────────────────────────────────────────────
-
     /// Changing this function would transitively affect many modules.
     HighBlastRadius {
         function_name: String,
@@ -603,7 +564,6 @@ pub enum FindingKind {
     },
 
     // ── Semantic Clustering ─────────────────────────────────────────────
-
     /// Function that interacts more with another file than its own.
     MisplacedFunction {
         function_name: String,
@@ -618,7 +578,6 @@ pub enum FindingKind {
     },
 
     // ── API Surface Analysis ────────────────────────────────────────────
-
     /// Public function with many callers and many params — fragile to change.
     UnstablePublicApi {
         function_name: String,
@@ -639,7 +598,6 @@ pub enum FindingKind {
     },
 
     // ── Cross-Language Boundaries ───────────────────────────────────────
-
     /// FFI boundary — function uses foreign function interface.
     FfiBoundary {
         function_name: String,
@@ -659,7 +617,6 @@ pub enum FindingKind {
     },
 
     // ── Configuration Detection ─────────────────────────────────────────
-
     /// Environment variable read.
     EnvVarUsage {
         function_name: String,
@@ -673,10 +630,7 @@ pub enum FindingKind {
     },
 
     /// Feature flag or conditional compilation.
-    FeatureFlag {
-        name: String,
-        location: String,
-    },
+    FeatureFlag { name: String, location: String },
 
     /// Config file reference — code reads from a config file.
     ConfigFileUsage {
@@ -685,7 +639,6 @@ pub enum FindingKind {
     },
 
     // ── Suboptimal data structure usage (checks 92-99) ─────────────────
-
     /// Vec/list used with append + contains but no index access → use HashSet/set.
     VecUsedAsSet {
         function_name: String,
@@ -784,8 +737,10 @@ pub struct AnalysisConfig {
     pub blast_radius_module_threshold: usize,
     /// Minimum test coverage ratio per file.
     pub test_ratio_threshold: f64,
-    /// Minimum modules touched to flag integration test smell.
+    /// Minimum files touched by a test to flag integration test smell.
     pub integration_test_module_threshold: usize,
+    /// List of check names (or category module names) to skip.
+    pub skip_checks: Vec<String>,
 }
 
 impl Default for AnalysisConfig {
@@ -801,6 +756,7 @@ impl Default for AnalysisConfig {
             blast_radius_module_threshold: 5,
             test_ratio_threshold: 0.30,
             integration_test_module_threshold: 4,
+            skip_checks: Vec::new(),
         }
     }
 }
