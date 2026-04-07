@@ -14,7 +14,8 @@ AstBasedContext-rs builds a code graph from AST/CST analysis and exposes it via 
 {
   "mcpServers": {
     "ast-context": {
-      "command": "/path/to/ast_context_mcp"
+      "command": "ast_context",
+      "args": ["mcp"]
     }
   }
 }
@@ -24,11 +25,11 @@ AstBasedContext-rs builds a code graph from AST/CST analysis and exposes it via 
 
 ```
 # Build the graph once
-ast_context_cli index /path/to/project --annotate --save graph.json
+ast_context index /path/to/project --annotate --save graph.json
 
 # Then query it
-ast_context_cli search --graph graph.json "my_function"
-ast_context_cli similar --graph graph.json --kind Function
+ast_context search --graph graph.json "my_function"
+ast_context similar --graph graph.json --kind Function
 ```
 
 ## Workflows
@@ -38,13 +39,13 @@ ast_context_cli similar --graph graph.json --kind Function
 **Goal**: Get a high-level map of the project before diving into code.
 
 ```
-1. index_directory { path: "/project", annotate: true, exclude: ["vendor/**", "*.generated.go"] }
+1. index_directory { path: "/project", annotate: true, exclude: ["vendor/**", "*.generated.go"], skip_tests: true }
 2. get_stats {}
 3. find_code { query: "main", kind: "Function" }
 4. find_complex_functions { limit: 10 }
 ```
 
-**Tip**: Use the `exclude` parameter or a `.astcontextignore` file to skip vendored, generated, or test fixture code that would add noise to the analysis.
+**Tip**: Use the `exclude` parameter, `.astcontextignore` (or `.astcontextignore.local`) files, and `skip_tests: true` to skip vendored, generated, or test fixture code that would add noise to the analysis.
 
 **What to look for**:
 - The stats tell you the scale and language mix
@@ -342,7 +343,9 @@ find_similar { kind: "Struct" }
 
 ## Supported Languages
 
-Python, Rust, TypeScript, JavaScript, Go, Java, C, C++
+Python, Rust, TypeScript, JavaScript, Go, Java, C, C++, C#, Ruby, PHP, Swift, Dart
+
+*(Note: Kotlin support is currently a TODO due to upstream parser dependencies).*
 
 Each language has a dedicated tree-sitter parser that extracts language-specific constructs (e.g., Rust traits, Go interfaces, Python decorators, Java annotations).
 

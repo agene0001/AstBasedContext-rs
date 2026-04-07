@@ -16,23 +16,22 @@ cargo clippy         # lint
 ## Workspace Structure
 
 ```
-crates/ast_context_core/   # Library crate — everything except binaries
-crates/ast_context_cli/    # Unified binary: ast_context (CLI + MCP server)
-  src/main.rs              # CLI entry point + subcommand dispatch
-  src/mcp/mod.rs           # MCP server loop (run_server())
-  src/mcp/protocol.rs      # JSON-RPC 2.0 types
-  src/mcp/tools.rs         # MCP tool definitions and handlers
-  src/setup.rs             # `ast_context setup` — auto-configure editors
+src/
+  main.rs              # CLI entry point + subcommand dispatch
+  mcp/mod.rs           # MCP server loop (run_server())
+  mcp/protocol.rs      # JSON-RPC 2.0 types
+  mcp/tools.rs         # MCP tool definitions and handlers
+  setup.rs             # `ast_context setup` — auto-configure editors
 ```
 
 The single `ast_context` binary serves both purposes:
 - `ast_context <cli-command>` — code analysis CLI
 - `ast_context mcp` — starts the MCP server (editors configure this command)
 
-## Key Modules (ast_context_core)
+## Key Modules (ast_context)
 
 - `parser/mod.rs` — `LanguageParser` trait + `parser_for_extension()` dispatcher
-- `parser/<lang>.rs` — one file per language (python, rust_lang, typescript, javascript, go, java, c_lang, cpp, csharp, ruby, php)
+- `parser/<lang>.rs` — one file per language (python, rust_lang, typescript, javascript, go, java, c_lang, cpp, csharp, ruby, php, swift, dart)
 - `graph/builder.rs` — two-pass graph builder (Pass 1: nodes + contains/imports; Pass 2: resolve cross-file calls/inherits)
 - `graph/code_graph.rs` — `CodeGraph` wrapping petgraph `DiGraph<GraphNode, EdgeKind>`
 - `graph/query.rs` — query methods on `CodeGraph`
@@ -131,7 +130,7 @@ JSON-RPC 2.0 over stdin/stdout. One JSON object per line.
 Methods implemented:
 - `initialize` → returns server info + capabilities
 - `tools/list` → returns all tool definitions
-- `tools/call` → dispatches to tool handler in `crates/ast_context_mcp/src/tools.rs`
+- `tools/call` → dispatches to tool handler in `src/mcp/tools.rs`
 - `ping` → empty response
 
 ## Dependencies of Note

@@ -2,7 +2,7 @@
 
 A Rust implementation of Ast based Context — builds a code graph from AST/CST analysis of your source code and exposes it to LLMs via an MCP server.
 
-Supports **11 languages**: Python, Rust, TypeScript, JavaScript, Go, Java, C, C++, C#, Ruby, PHP.
+Supports **13 languages**: Python, Rust, TypeScript, JavaScript, Go, Java, C, C++, C#, Ruby, PHP, Swift, Dart. *(Note: Kotlin is currently a TODO due to upstream parser dependencies).*
 
 ## What it does
 
@@ -15,43 +15,64 @@ Supports **11 languages**: Python, Rust, TypeScript, JavaScript, Go, Java, C, C+
 ## Installation
 
 ```
-cargo build --release
+cargo install ast_context
 ```
 
-Binaries will be at `target/release/ast_context_cli` and `target/release/ast_context_mcp`.
+This installs the `ast_context` binary which handles both CLI code analysis and the MCP server.
+
+### Build from source
+
+If you prefer to build from source instead:
+
+```
+git clone https://github.com/agene0001/AstBasedContext-rs.git
+cd AstBasedContext-rs
+cargo install --path .
+```
+
+This will compile the project and install the `ast_context` binary to your Cargo bin directory.
+
+Once installed (either from crates.io or from source), run the setup command to automatically configure your editors with the MCP server:
+
+```
+ast_context setup
+```
 
 ## CLI Usage
 
 ### Index a project
 
 ```
-ast-context index <path> [--format stats|json|jsonl] [--save graph.json] [--annotate] [--exclude <pattern>...]
+ast_context index <path> [--format stats|json|jsonl] [--save graph.json] [--annotate] [--exclude <pattern>...]
 ```
 
 ```
 # Print summary stats
-ast-context index ./my-project
+ast_context index ./my-project
 
 # Save the graph to a file for later querying
-ast-context index ./my-project --save graph.json
+ast_context index ./my-project --save graph.json
 
 # Index with source annotations (enables similarity/redundancy detection)
-ast-context index ./my-project --save graph.json --annotate
+ast_context index ./my-project --save graph.json --annotate
+
+# Skip test files for a smaller, faster graph focused on production code
+ast_context index ./my-project --skip-tests
 
 # Exclude directories/files (repeatable, gitignore glob syntax)
-ast-context index ./my-project --exclude "vendor/**" --exclude "*.generated.go"
+ast_context index ./my-project --exclude "vendor/**" --exclude "*.generated.go"
 
 # Set a custom file size limit in MB (default: 50MB — skips huge auto-generated files)
-ast-context index ./my-project --annotate --save graph.json --max-file-size 20
+ast_context index ./my-project --annotate --save graph.json --max-file-size 20
 
 # Export as JSON or JSONL
-ast-context index ./my-project --format json --output graph.json
-ast-context index ./my-project --format jsonl --output output_dir/
+ast_context index ./my-project --format json --output graph.json
+ast_context index ./my-project --format jsonl --output output_dir/
 ```
 
-#### `.astcontextignore`
+#### `.astcontextignore` and `.astcontextignore.local`
 
-Place a `.astcontextignore` file in your project root (or any subdirectory) to permanently exclude paths. Uses the same syntax as `.gitignore`:
+Place an `.astcontextignore` file in your project root (or any subdirectory) to permanently exclude paths. You can also use `.astcontextignore.local` for per-user exclusions that you don't want to commit to git. Both use the same syntax as `.gitignore`:
 
 ```
 # Skip vendored code
@@ -70,24 +91,24 @@ This is read automatically — no CLI flags needed. You can combine it with `--e
 
 ```
 # Search by name (all types)
-ast-context search --graph graph.json "parse"
+ast_context search --graph graph.json "parse"
 
 # Search for functions only
-ast-context search --graph graph.json "parse" --kind Function
+ast_context search --graph graph.json "parse" --kind Function
 
 # Analyze relationships
-ast-context analyze --graph graph.json "my_function" --relationship callers
-ast-context analyze --graph graph.json "my_function" --relationship callees
-ast-context analyze --graph graph.json "MyClass"    --relationship inheritance
-ast-context analyze --graph graph.json "my_fn"      --relationship call_chain --depth 5
-ast-context analyze --graph graph.json "MyTrait"    --relationship implementors
-ast-context analyze --graph graph.json "MyModule"   --relationship children
+ast_context analyze --graph graph.json "my_function" --relationship callers
+ast_context analyze --graph graph.json "my_function" --relationship callees
+ast_context analyze --graph graph.json "MyClass"    --relationship inheritance
+ast_context analyze --graph graph.json "my_fn"      --relationship call_chain --depth 5
+ast_context analyze --graph graph.json "MyTrait"    --relationship implementors
+ast_context analyze --graph graph.json "MyModule"   --relationship children
 
 # Find dead code (functions never called)
-ast-context dead-code --graph graph.json --limit 50
+ast_context dead-code --graph graph.json --limit 50
 
 # Find most complex functions (by cyclomatic complexity)
-ast-context complexity --graph graph.json --limit 20
+ast_context complexity --graph graph.json --limit 20
 ```
 
 ### Find similar/redundant code
@@ -96,13 +117,13 @@ Requires `--annotate` during indexing. Finds groups of structurally similar node
 
 ```
 # Find similar functions (great for finding consolidation opportunities)
-ast-context similar --graph graph.json --kind Function --min-lines 8
+ast_context similar --graph graph.json --kind Function --min-lines 8
 
 # Find similar structs/classes
-ast-context similar --graph graph.json --kind Struct
+ast_context similar --graph graph.json --kind Struct
 
 # Find all similar nodes across all types
-ast-context similar --graph graph.json
+ast_context similar --graph graph.json
 ```
 
 This is designed for AI-assisted code review: the source snippets give an LLM enough context to identify genuinely redundant code even when names differ completely. Use cases:
@@ -133,16 +154,16 @@ Full redundancy, architecture, anti-pattern, and code quality analysis with conf
 
 ```
 # Show all findings
-ast-context redundancy --graph graph.json
+ast_context redundancy --graph graph.json
 
 # Only critical + high confidence
-ast-context redundancy --graph graph.json --tier high
+ast_context redundancy --graph graph.json --tier high
 
 # Only critical
-ast-context redundancy --graph graph.json --tier critical
+ast_context redundancy --graph graph.json --tier critical
 
 # Tune thresholds
-ast-context redundancy --graph graph.json \
+ast_context redundancy --graph graph.json \
   --split-complexity 20 --split-lines 80 \
   --near-dup-threshold 0.85 \
   --structural-threshold 0.55 \
@@ -152,8 +173,8 @@ ast-context redundancy --graph graph.json \
 ### Watch for changes
 
 ```
-ast-context watch ./my-project --debounce 2000
-ast-context watch ./my-project --exclude "build/**"
+ast_context watch ./my-project --debounce 2000
+ast_context watch ./my-project --exclude "build/**"
 ```
 
 Rebuilds the graph whenever files change. Useful during active development.
@@ -161,7 +182,7 @@ Rebuilds the graph whenever files change. Useful during active development.
 ### Parse a single file
 
 ```
-ast-context parse src/main.rs
+ast_context parse src/main.rs
 ```
 
 Prints the raw parse result as JSON.
@@ -169,7 +190,7 @@ Prints the raw parse result as JSON.
 ### List supported languages
 
 ```
-ast-context languages
+ast_context languages
 ```
 
 ## MCP Server
@@ -181,7 +202,7 @@ The MCP server lets Claude (or any MCP-compatible LLM) query your code graph dir
 After installing, run the setup command once to auto-configure every detected editor:
 
 ```
-ast-context setup
+ast_context setup
 ```
 
 This detects and configures:
@@ -195,10 +216,10 @@ This detects and configures:
 
 ```
 # Preview what would be changed without modifying anything
-ast-context setup --dry-run
+ast_context setup --dry-run
 
 # Override the binary path if auto-detection fails
-ast-context setup --mcp-path /custom/path/to/ast_context_mcp
+ast_context setup --mcp-path /custom/path/to/ast_context
 ```
 
 Restart your editor after running setup. Then ask your AI assistant to index your project:
@@ -219,7 +240,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 {
   "mcpServers": {
     "ast-context": {
-      "command": "ast_context_mcp"
+      "command": "ast_context",
+      "args": ["mcp"]
     }
   }
 }
@@ -234,8 +256,8 @@ Add to `~/.config/zed/settings.json`:
   "context_servers": {
     "ast-context": {
       "command": {
-        "path": "ast_context_mcp",
-        "args": []
+        "path": "ast_context",
+        "args": ["mcp"]
       }
     }
   }
@@ -252,7 +274,7 @@ Index /path/to/my-project with annotations, excluding node_modules and vendor
 
 | Tool | Description |
 |------|-------------|
-| `index_directory` | Index a directory and build its code graph. Auto-caches to `.ast_context_cache.json` — subsequent calls load from cache instantly if no source files have changed. Pass `force_reindex=true` to rebuild. |
+| `index_directory` | Index a directory and build its code graph. Auto-caches to `.ast_context_cache.json` — subsequent calls load from cache instantly if no source files have changed. Pass `force_reindex=true` to rebuild, or `skip_tests=true` to exclude tests. |
 | `find_code` | Search for functions/classes/structs by name (partial match, case-insensitive) |
 | `get_file_summary` | List all symbols defined in a specific file — great for understanding a file before editing it |
 | `get_source` | Retrieve the source snippet for a named symbol (requires `annotate=true` on index) |
@@ -275,8 +297,8 @@ All query tools accept an optional `repository` parameter to target a specific i
 
 The first time you index a project the graph is saved to `{project}/.ast_context_cache.json` (automatically added to `.gitignore`). In subsequent sessions, calling `index_directory` on the same path will:
 
-- Load from cache instantly if no source files have changed
-- Automatically re-index if any source file is newer than the cache
+- Load from cache instantly if no source files have changed **and** the configuration (like `annotate`, `exclude`, or `skip_tests`) is identical
+- Automatically re-index if any source file is newer than the cache, or if the indexing configuration fingerprint has changed
 - Rebuild unconditionally if `force_reindex=true` is passed
 
 This means you can safely call `index_directory` at the start of every session without worrying about performance.
@@ -330,17 +352,16 @@ Example session:
 
 ```
 AstBasedContext-rs/
-├── crates/
-│   ├── ast_context_core/   # Core library: parsing, graph building, querying
-│   │   └── src/
-│   │       ├── parser/     # Language parsers (one file per language)
-│   │       ├── graph/      # Graph data structure, builder, queries
-│   │       ├── types/      # Node/edge types, language enum
-│   │       ├── walker.rs   # Directory walker
-│   │       ├── watcher.rs  # File watcher
-│   │       └── serialize.rs # JSON/JSONL export
-│   ├── ast_context_cli/    # CLI binary
-│   └── ast_context_mcp/    # MCP server binary
+├── src/
+│   ├── parser/      # Language parsers (one file per language)
+│   ├── graph/       # Graph data structure, builder, queries
+│   ├── types/       # Node/edge types, language enum
+│   ├── mcp/         # MCP server implementation
+│   ├── redundancy/  # Redundancy analysis and tiered checks
+│   ├── walker.rs    # Directory walker
+│   ├── watcher.rs   # File watcher
+│   ├── serialize.rs # JSON/JSONL export
+│   └── main.rs      # Unified binary entry point (CLI + MCP)
 └── Cargo.toml
 ```
 

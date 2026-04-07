@@ -1,6 +1,6 @@
 [package]
 name = "ast_context"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "AST/CST-based code graph analysis — index codebases, find dead code, detect redundancy, and expose everything via an MCP server for AI assistants"
 license = "MIT"
@@ -41,7 +41,7 @@ tree-sitter-ruby = "0.23"
 tree-sitter-php = "0.24.2"
 tree-sitter-language = "0.1"
 tree-sitter-swift = "0.7.1"
-# tree-sitter-kotlin: vendored via build.rs (crates.io version targets tree-sitter <0.23)
+# TODO: Add tree-sitter-kotlin (currently skipped due to dependency issues: crates.io version targets tree-sitter <0.23, and vendoring parser.c is impractical due to 23MB size)
 # tree-sitter-dart: vendored via grammars/dart/ (crates.io version targets tree-sitter <0.26)
 thiserror = "2"
 ignore = "0.4"
