@@ -1135,6 +1135,11 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
             .filter(|f| f.tier <= min_tier)
             .collect();
 
+        // Randomize findings so that limits don't always return the exact same items
+        use rand::seq::SliceRandom;
+        let mut rng = rand::rng();
+        filtered.shuffle(&mut rng);
+
         if limit_per_type > 0 {
             let mut counts = std::collections::HashMap::new();
             filtered.retain(|f| {
@@ -1143,6 +1148,9 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                 *count <= limit_per_type
             });
         }
+
+        // Restore ordering by tier (Critical first)
+        filtered.sort_by_key(|f| f.tier);
 
         if filtered.is_empty() {
             return ToolResult {

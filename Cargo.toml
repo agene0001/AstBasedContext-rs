@@ -1,6 +1,6 @@
 [package]
 name = "ast_context"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "AST/CST-based code graph analysis — index codebases, find dead code, detect redundancy, and expose everything via an MCP server for AI assistants"
 license = "MIT"
@@ -48,6 +48,7 @@ ignore = "0.4"
 rayon = "1.10"
 streaming-iterator = "0.1"
 notify-debouncer-full = "0.7"
+rand = "0.10.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 notify = { version = "7", features = ["macos_fsevent"] }

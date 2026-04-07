@@ -597,6 +597,11 @@ fn main() {
                 .filter(|f| f.tier <= min_tier)
                 .collect();
 
+            // Randomize findings so that limit_per_type doesn't always return the same items
+            use rand::seq::SliceRandom;
+            let mut rng = rand::rng();
+            filtered.shuffle(&mut rng);
+
             if limit_per_type > 0 {
                 let mut counts = std::collections::HashMap::new();
                 filtered.retain(|f| {
@@ -605,6 +610,9 @@ fn main() {
                     *count <= limit_per_type
                 });
             }
+
+            // Restore ordering by tier (Critical first)
+            filtered.sort_by_key(|f| f.tier);
 
             if filtered.is_empty() {
                 println!("No redundancy findings at tier {tier} or above.");
