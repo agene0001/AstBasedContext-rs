@@ -17,14 +17,22 @@ cargo clippy         # lint
 
 ```
 crates/ast_context_core/   # Library crate — everything except binaries
-crates/ast_context_cli/    # CLI binary: ast_context_cli
-crates/ast_context_mcp/    # MCP server binary: ast_context_mcp
+crates/ast_context_cli/    # Unified binary: ast_context (CLI + MCP server)
+  src/main.rs              # CLI entry point + subcommand dispatch
+  src/mcp/mod.rs           # MCP server loop (run_server())
+  src/mcp/protocol.rs      # JSON-RPC 2.0 types
+  src/mcp/tools.rs         # MCP tool definitions and handlers
+  src/setup.rs             # `ast_context setup` — auto-configure editors
 ```
+
+The single `ast_context` binary serves both purposes:
+- `ast_context <cli-command>` — code analysis CLI
+- `ast_context mcp` — starts the MCP server (editors configure this command)
 
 ## Key Modules (ast_context_core)
 
 - `parser/mod.rs` — `LanguageParser` trait + `parser_for_extension()` dispatcher
-- `parser/<lang>.rs` — one file per language (python, rust_lang, typescript, javascript, go, java, c_lang, cpp)
+- `parser/<lang>.rs` — one file per language (python, rust_lang, typescript, javascript, go, java, c_lang, cpp, csharp, ruby, php)
 - `graph/builder.rs` — two-pass graph builder (Pass 1: nodes + contains/imports; Pass 2: resolve cross-file calls/inherits)
 - `graph/code_graph.rs` — `CodeGraph` wrapping petgraph `DiGraph<GraphNode, EdgeKind>`
 - `graph/query.rs` — query methods on `CodeGraph`
@@ -80,8 +88,8 @@ When `GraphBuilder::build_with_options(path, true)` is called, the `annotate` mo
 - Snippets are truncated at 4KB per node
 - `GraphNode::source_snippet()` accessor returns `Option<&str>`
 - The `find_similar_nodes()` query uses Jaccard token similarity + line count ratio to group potentially redundant nodes
-- `redundancy.rs` provides tiered analysis across 99 checks in 10+ categories
-- 99 check types across `FindingKind` enum, each assigned a `Tier` (Critical/High/Medium/Low)
+- `redundancy.rs` provides tiered analysis across 102 checks in 10+ categories
+- 102 check types across `FindingKind` enum, each assigned a `Tier` (Critical/High/Medium/Low)
 - Checks 1-5: function-level redundancy (passthrough, near-duplicate, similar, merge, split)
 - Checks 6-7: struct/enum overlap
 - Checks 8-10: type suggestions (parameter struct, enum dispatch, trait extraction)
@@ -105,6 +113,7 @@ When `GraphBuilder::build_with_options(path, true)` is called, the `annotate` mo
 - Checks 85-87: cross-language boundaries (FFI boundary, subprocess calls, IPC/RPC boundary)
 - Checks 88-91: configuration detection (env var usage, hardcoded endpoints, feature flags, config file usage)
 - Checks 92-99: data structure suggestions (vec-as-set, vec-as-map, linear search in loop, string concat in loop, sorted vec lookup, nested loop lookup, hashmap sequential keys, excessive collect-iterate)
+- Checks 100-102: code quality (unused imports, inconsistent error handling, tech debt comments)
 - This is opt-in because it increases graph size ~40%
 
 ### Graph save/load

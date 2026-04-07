@@ -1,8 +1,8 @@
 # AstBasedContext-rs
 
-A Rust rewrite of [CodeGraphContext](https://github.com/CodeGraphContext/CodeGraphContext-rs) — builds a code graph from AST/CST analysis of your source code and exposes it to LLMs via an MCP server.
+A Rust implementation of Ast based Context — builds a code graph from AST/CST analysis of your source code and exposes it to LLMs via an MCP server.
 
-Supports **8 languages**: Python, Rust, TypeScript, JavaScript, Go, Java, C, C++.
+Supports **11 languages**: Python, Rust, TypeScript, JavaScript, Go, Java, C, C++, C#, Ruby, PHP.
 
 ## What it does
 
@@ -40,6 +40,9 @@ ast-context index ./my-project --save graph.json --annotate
 
 # Exclude directories/files (repeatable, gitignore glob syntax)
 ast-context index ./my-project --exclude "vendor/**" --exclude "*.generated.go"
+
+# Set a custom file size limit in MB (default: 50MB — skips huge auto-generated files)
+ast-context index ./my-project --annotate --save graph.json --max-file-size 20
 
 # Export as JSON or JSONL
 ast-context index ./my-project --format json --output graph.json
@@ -109,7 +112,7 @@ This is designed for AI-assisted code review: the source snippets give an LLM en
 
 ### Tiered redundancy analysis
 
-Full redundancy, architecture, anti-pattern, and code quality analysis with confidence tiers (Critical > High > Medium > Low). **99 checks** spanning:
+Full redundancy, architecture, anti-pattern, and code quality analysis with confidence tiers (Critical > High > Medium > Low). **102 checks** spanning:
 
 - **Redundancy**: passthrough wrappers, near-duplicates, merge/split candidates, overlapping structs/enums
 - **Type suggestions**: parameter structs, enum dispatch, trait extraction
@@ -139,7 +142,11 @@ ast-context redundancy --graph graph.json --tier high
 ast-context redundancy --graph graph.json --tier critical
 
 # Tune thresholds
-ast-context redundancy --graph graph.json --split-complexity 20 --split-lines 80
+ast-context redundancy --graph graph.json \
+  --split-complexity 20 --split-lines 80 \
+  --near-dup-threshold 0.85 \
+  --structural-threshold 0.55 \
+  --merge-threshold 0.45
 ```
 
 ### Watch for changes
@@ -169,33 +176,110 @@ ast-context languages
 
 The MCP server lets Claude (or any MCP-compatible LLM) query your code graph directly.
 
-### Configure with Claude Desktop
+### Quick setup
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+After installing, run the setup command once to auto-configure every detected editor:
+
+```
+ast-context setup
+```
+
+This detects and configures:
+- **Claude Desktop** — macOS & Windows
+- **Claude Code** — via `claude mcp add`
+- **Zed** — `~/.config/zed/settings.json`
+- **Cursor** — `~/.cursor/mcp.json`
+- **Windsurf** — `~/.codeium/windsurf/mcp_config.json`
+- **VS Code** (GitHub Copilot, v1.99+) — user-level `mcp.json`
+- **JetBrains IDEs** (IntelliJ, PyCharm, GoLand, WebStorm, …) — all detected installs
+
+```
+# Preview what would be changed without modifying anything
+ast-context setup --dry-run
+
+# Override the binary path if auto-detection fails
+ast-context setup --mcp-path /custom/path/to/ast_context_mcp
+```
+
+Restart your editor after running setup. Then ask your AI assistant to index your project:
+
+```
+Index /path/to/my-project with annotations
+```
+
+### Manual configuration
+
+If you prefer to configure manually or use an unsupported editor:
+
+### Configure with Claude Desktop / Claude Code
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
 
 ```json
 {
   "mcpServers": {
     "ast-context": {
-      "command": "/path/to/ast_context_mcp"
+      "command": "ast_context_mcp"
     }
   }
 }
+```
+
+### Configure with Zed
+
+Add to `~/.config/zed/settings.json`:
+
+```json
+{
+  "context_servers": {
+    "ast-context": {
+      "command": {
+        "path": "ast_context_mcp",
+        "args": []
+      }
+    }
+  }
+}
+```
+
+After configuring, ask your AI assistant to index your project:
+
+```
+Index /path/to/my-project with annotations, excluding node_modules and vendor
 ```
 
 ### Available MCP Tools
 
 | Tool | Description |
 |------|-------------|
-| `index_directory` | Index a directory and build its code graph |
-| `find_code` | Search for functions/classes by name |
-| `analyze_relationships` | Callers, callees, inheritance, call chains |
+| `index_directory` | Index a directory and build its code graph. Auto-caches to `.ast_context_cache.json` — subsequent calls load from cache instantly if no source files have changed. Pass `force_reindex=true` to rebuild. |
+| `find_code` | Search for functions/classes/structs by name (partial match, case-insensitive) |
+| `get_file_summary` | List all symbols defined in a specific file — great for understanding a file before editing it |
+| `get_source` | Retrieve the source snippet for a named symbol (requires `annotate=true` on index) |
+| `get_context_for_symbol` | All context needed before editing a symbol: source, callers, callees, and similar functions in one call |
+| `find_references` | All usages of a symbol: callers, inheritors, implementors, importers, and test functions |
+| `get_module_overview` | Directory-level summary: files, line counts, public symbols, and cross-file dependencies |
+| `analyze_relationships` | Callers, callees, inheritance, call chains, implementors, children |
 | `find_dead_code` | Find uncalled functions |
 | `find_complex_functions` | Rank functions by cyclomatic complexity |
 | `get_stats` | Node/edge counts by type |
 | `list_repositories` | Show all indexed repositories |
 | `find_similar` | Find groups of redundant/similar code (requires `annotate=true` on index) |
-| `analyze_redundancy` | Tiered redundancy + architecture + anti-pattern + type system + risk + boundary analysis (99 checks across 4 tiers) |
+| `analyze_redundancy` | Tiered redundancy + architecture + anti-pattern + type system + risk + boundary analysis (102 checks across 4 tiers, requires `annotate=true`) |
+| `save_graph` | Save the in-memory graph to a file for manual archiving or sharing |
+| `load_graph` | Load a previously saved graph into the session |
+
+All query tools accept an optional `repository` parameter to target a specific indexed directory when multiple repos are loaded.
+
+### Session persistence
+
+The first time you index a project the graph is saved to `{project}/.ast_context_cache.json` (automatically added to `.gitignore`). In subsequent sessions, calling `index_directory` on the same path will:
+
+- Load from cache instantly if no source files have changed
+- Automatically re-index if any source file is newer than the cache
+- Rebuild unconditionally if `force_reindex=true` is passed
+
+This means you can safely call `index_directory` at the start of every session without worrying about performance.
 
 ### MCP Protocol
 
@@ -266,7 +350,7 @@ AstBasedContext-rs/
 cargo test
 ```
 
-29 tests covering the Python parser and graph builder.
+29 tests covering the Python parser and graph builder. More language-specific tests are a good contribution target.
 
 ## Future Work
 

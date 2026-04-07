@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: ''
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            suffix: ''
+            cross: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            suffix: ''
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            suffix: ''
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: .exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (for ARM Linux)
+        if: matrix.cross
+        run: cargo install cross
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build CLI
+        run: |
+          ${{ matrix.cross && 'cross' || 'cargo' }} build --release \
+            --bin ast_context_cli \
+            --target ${{ matrix.target }}
+
+      - name: Build MCP server
+        run: |
+          ${{ matrix.cross && 'cross' || 'cargo' }} build --release \
+            --bin ast_context_mcp \
+            --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          TARGET=${{ matrix.target }}
+          TAG=${{ github.ref_name }}
+          CLI=ast_context_cli${{ matrix.suffix }}
+          MCP=ast_context_mcp${{ matrix.suffix }}
+          DIST=dist
+
+          mkdir -p $DIST
+
+          cp target/$TARGET/release/$CLI $DIST/
+          cp target/$TARGET/release/$MCP $DIST/
+
+          cd $DIST
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            7z a "../ast-context-${TAG}-${TARGET}.zip" *
+          else
+            tar czf "../ast-context-${TAG}-${TARGET}.tar.gz" *
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ast-context-${{ matrix.target }}
+          path: |
+            ast-context-*.tar.gz
+            ast-context-*.zip
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
