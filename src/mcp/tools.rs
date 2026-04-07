@@ -259,9 +259,13 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                     },
                     "limit_per_type": {
                         "type": "integer",
-                        "description": "Maximum number of findings to return per redundancy type (default: 10, 0 = all)"
+                        "description": "Maximum number of findings to return per redundancy type (default: 5, 0 = all)"
                     },
                     "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of total findings to return (default: no limit)"
+                    },
+                    "repository": {
                         "type": "string",
                         "description": "Path of the indexed repository to query (optional)"
                     }
@@ -675,7 +679,7 @@ fn handle_get_file_summary(state: &SharedState, args: &serde_json::Value) -> Too
                     GraphNode::Macro(m) => Some(m.path.as_path()),
                     _ => None,
                 }?;
-                if node_path.ends_with(needle) || node_path == needle {
+                if node_path.ends_with(needle) || needle.ends_with(node_path) || node_path == needle {
                     Some(node)
                 } else {
                     None
@@ -788,8 +792,9 @@ fn handle_analyze_relationships(state: &SharedState, args: &serde_json::Value) -
             "callers" => {
                 let callers = graph.get_callers_of(idx);
                 text.push_str(&format!("Callers of '{name}' ({} found):\n", callers.len()));
-                for (_, node) in &callers {
-                    text.push_str(&format!("  - {}\n", format_node_brief(node)));
+                let list: Vec<_> = callers.iter().map(|(_, n)| format_node_brief(n)).collect();
+                if !list.is_empty() {
+                    text.push_str(&format!("  └─ {}\n", list.join(", ")));
                 }
             }
             "callees" => {
@@ -798,8 +803,9 @@ fn handle_analyze_relationships(state: &SharedState, args: &serde_json::Value) -
                     "Functions called by '{name}' ({} found):\n",
                     callees.len()
                 ));
-                for (_, node) in &callees {
-                    text.push_str(&format!("  - {}\n", format_node_brief(node)));
+                let list: Vec<_> = callees.iter().map(|(_, n)| format_node_brief(n)).collect();
+                if !list.is_empty() {
+                    text.push_str(&format!("  └─ {}\n", list.join(", ")));
                 }
             }
             "inheritance" => {
@@ -834,8 +840,9 @@ fn handle_analyze_relationships(state: &SharedState, args: &serde_json::Value) -
                     "Implementors of '{name}' ({} found):\n",
                     impls.len()
                 ));
-                for (_, node) in &impls {
-                    text.push_str(&format!("  - {}\n", format_node_brief(node)));
+                let list: Vec<_> = impls.iter().map(|(_, n)| format_node_brief(n)).collect();
+                if !list.is_empty() {
+                    text.push_str(&format!("  └─ {}\n", list.join(", ")));
                 }
             }
             "children" => {
@@ -844,8 +851,9 @@ fn handle_analyze_relationships(state: &SharedState, args: &serde_json::Value) -
                     "Children of '{name}' ({} found):\n",
                     children.len()
                 ));
-                for (_, node) in &children {
-                    text.push_str(&format!("  - {}\n", format_node_brief(node)));
+                let list: Vec<_> = children.iter().map(|(_, n)| format_node_brief(n)).collect();
+                if !list.is_empty() {
+                    text.push_str(&format!("  └─ {}\n", list.join(", ")));
                 }
             }
             _ => {
@@ -1095,7 +1103,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         .get("limit_per_type")
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)
-        .unwrap_or(10);
+        .unwrap_or(5);
     let limit = args
         .get("limit")
         .and_then(|v| v.as_u64())
@@ -1307,29 +1315,21 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                 finding.description
             ));
 
-            for &ni in &finding.node_indices {
-                let node_idx = petgraph::graph::NodeIndex::new(ni);
-                if let Some(node) = graph.get_node(node_idx) {
-                    let loc = node.location();
-                    let path_str = std::env::current_dir()
-                        .ok()
-                        .and_then(|cwd| {
-                            std::path::Path::new(&loc.0)
-                                .strip_prefix(&cwd)
-                                .ok()
-                                .map(|p| p.display().to_string())
-                        })
-                        .unwrap_or_else(|| loc.0.clone());
-                    let loc_str = if path_str.is_empty() {
-                        "".to_string()
-                    } else if loc.1 > 0 {
-                        format!(" ({}:{})", path_str, loc.1)
-                    } else {
-                        format!(" ({})", path_str)
-                    };
-                    text.push_str(&format!("  {} [{}]{loc_str}\n", node.name(), node.label()));
+            if include_source {
+                for &ni in &finding.node_indices {
+                    let node_idx = petgraph::graph::NodeIndex::new(ni);
+                    if let Some(node) = graph.get_node(node_idx) {
+                        let loc = node.location();
+                        let path_str = loc.0;
+                        let loc_str = if path_str.is_empty() {
+                            "".to_string()
+                        } else if loc.1 > 0 {
+                            format!(" ({}:{})", path_str, loc.1)
+                        } else {
+                            format!(" ({})", path_str)
+                        };
+                        text.push_str(&format!("  {} [{}]{loc_str}\n", node.name(), node.label()));
 
-                    if include_source {
                         if let Some(src) = node.source_snippet() {
                             for line in src.lines().take(5) {
                                 text.push_str(&format!("    │ {line}\n"));
@@ -1340,6 +1340,41 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                             }
                         }
                     }
+                }
+            } else {
+                let mut nodes_info = Vec::new();
+                for &ni in &finding.node_indices {
+                    let node_idx = petgraph::graph::NodeIndex::new(ni);
+                    if let Some(node) = graph.get_node(node_idx) {
+                        let loc = node.location();
+                        let path_str = loc.0;
+                        let loc_str = if path_str.is_empty() {
+                            "".to_string()
+                        } else if loc.1 > 0 {
+                            format!("({}:{})", path_str, loc.1)
+                        } else {
+                            format!("({})", path_str)
+                        };
+                        
+                        // Use acronyms for common node types to save space
+                        let label_acronym = match node.label() {
+                            "Function" => "fn",
+                            "Method" => "m",
+                            "Class" => "c",
+                            "Struct" => "s",
+                            "Trait" => "t",
+                            "Interface" => "i",
+                            "Enum" => "e",
+                            "Variable" => "v",
+                            "File" => "f",
+                            other => other,
+                        };
+                        
+                        nodes_info.push(format!("{}({}){}", node.name(), label_acronym, loc_str));
+                    }
+                }
+                if !nodes_info.is_empty() {
+                    text.push_str(&format!("  └─ {}\n", nodes_info.join(", ")));
                 }
             }
             text.push('\n');
@@ -1543,9 +1578,8 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
         if callers.is_empty() {
             text.push_str("  (none — may be an entry point or dead code)\n");
         } else {
-            for (_, n) in callers.iter().take(20) {
-                text.push_str(&format!("  {}\n", format_node_brief(n)));
-            }
+            let list: Vec<_> = callers.iter().take(20).map(|(_, n)| format_node_brief(n)).collect();
+            text.push_str(&format!("  {}\n", list.join(", ")));
             if callers.len() > 20 {
                 text.push_str(&format!("  ... and {} more\n", callers.len() - 20));
             }
@@ -1558,9 +1592,8 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
         if callees.is_empty() {
             text.push_str("  (none)\n");
         } else {
-            for (_, n) in callees.iter().take(20) {
-                text.push_str(&format!("  {}\n", format_node_brief(n)));
-            }
+            let list: Vec<_> = callees.iter().take(20).map(|(_, n)| format_node_brief(n)).collect();
+            text.push_str(&format!("  {}\n", list.join(", ")));
             if callees.len() > 20 {
                 text.push_str(&format!("  ... and {} more\n", callees.len() - 20));
             }
@@ -1578,9 +1611,8 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
                         "── Similar code ({} match(es)) ──\n",
                         others.len()
                     ));
-                    for (_, n) in others.iter().take(5) {
-                        text.push_str(&format!("  {}\n", format_node_brief(n)));
-                    }
+                    let list: Vec<_> = others.iter().take(5).map(|(_, n)| format_node_brief(n)).collect();
+                    text.push_str(&format!("  {}\n", list.join(", ")));
                     text.push('\n');
                 }
             }
@@ -1629,8 +1661,9 @@ fn handle_find_references(state: &SharedState, args: &serde_json::Value) -> Tool
         // CALLS edges (reverse) — who calls this
         let callers = graph.get_callers_of(*idx);
         text.push_str(&format!("── Called by ({}) ──\n", callers.len()));
-        for (_, n) in callers.iter().take(30) {
-            text.push_str(&format!("  {}\n", format_node_brief(n)));
+        let list: Vec<_> = callers.iter().take(30).map(|(_, n)| format_node_brief(n)).collect();
+        if !list.is_empty() {
+            text.push_str(&format!("  {}\n", list.join(", ")));
         }
         if callers.len() > 30 {
             text.push_str(&format!("  ... and {} more\n", callers.len() - 30));
@@ -1646,9 +1679,8 @@ fn handle_find_references(state: &SharedState, args: &serde_json::Value) -> Tool
             .collect::<Vec<_>>();
         if !inheritors.is_empty() {
             text.push_str(&format!("── Inherited by ({}) ──\n", inheritors.len()));
-            for n in &inheritors {
-                text.push_str(&format!("  {}\n", format_node_brief(n)));
-            }
+            let list: Vec<_> = inheritors.iter().map(|n| format_node_brief(n)).collect();
+            text.push_str(&format!("  {}\n", list.join(", ")));
             text.push('\n');
         }
 
@@ -1656,9 +1688,8 @@ fn handle_find_references(state: &SharedState, args: &serde_json::Value) -> Tool
         let implementors = graph.get_implementors(*idx);
         if !implementors.is_empty() {
             text.push_str(&format!("── Implemented by ({}) ──\n", implementors.len()));
-            for (_, n) in &implementors {
-                text.push_str(&format!("  {}\n", format_node_brief(n)));
-            }
+            let list: Vec<_> = implementors.iter().map(|(_, n)| format_node_brief(n)).collect();
+            text.push_str(&format!("  {}\n", list.join(", ")));
             text.push('\n');
         }
 
@@ -1671,9 +1702,8 @@ fn handle_find_references(state: &SharedState, args: &serde_json::Value) -> Tool
             .collect::<Vec<_>>();
         if !importers.is_empty() {
             text.push_str(&format!("── Imported by ({}) ──\n", importers.len()));
-            for n in &importers {
-                text.push_str(&format!("  {}\n", format_node_brief(n)));
-            }
+            let list: Vec<_> = importers.iter().map(|n| format_node_brief(n)).collect();
+            text.push_str(&format!("  {}\n", list.join(", ")));
             text.push('\n');
         }
 
@@ -1686,9 +1716,8 @@ fn handle_find_references(state: &SharedState, args: &serde_json::Value) -> Tool
             .collect::<Vec<_>>();
         if !testers.is_empty() {
             text.push_str(&format!("── Tested by ({}) ──\n", testers.len()));
-            for n in &testers {
-                text.push_str(&format!("  {}\n", format_node_brief(n)));
-            }
+            let list: Vec<_> = testers.iter().map(|n| format_node_brief(n)).collect();
+            text.push_str(&format!("  {}\n", list.join(", ")));
             text.push('\n');
         }
 
@@ -1737,6 +1766,8 @@ fn handle_get_module_overview(state: &SharedState, args: &serde_json::Value) -> 
                 if let GraphNode::File(f) = node {
                     if f.path.ends_with(needle)
                         || f.path.ancestors().any(|a| a.ends_with(needle))
+                        || needle.ends_with(&f.path)
+                        || needle.ancestors().any(|a| a.ends_with(&f.path))
                         || f.path.to_string_lossy().contains(dir_path)
                     {
                         return Some((idx, node));
@@ -2035,18 +2066,28 @@ fn format_node(node: &GraphNode) -> String {
 }
 
 fn format_node_brief(node: &GraphNode) -> String {
+    let label_acronym = match node.label() {
+        "Function" => "fn",
+        "Method" => "m",
+        "Class" => "c",
+        "Struct" => "s",
+        "Trait" => "t",
+        "Interface" => "i",
+        "Enum" => "e",
+        "Variable" => "v",
+        "File" => "f",
+        "Module" => "mod",
+        other => other,
+    };
+    
     match node {
-        GraphNode::Function(f) => {
-            format!("{} ({}:{})", f.name, f.path.display(), f.span.start_line)
-        }
-        GraphNode::Class(c) => format!("{} ({}:{})", c.name, c.path.display(), c.span.start_line),
-        GraphNode::Struct(s) => format!("{} ({}:{})", s.name, s.path.display(), s.span.start_line),
-        GraphNode::Trait(t) => format!("{} ({}:{})", t.name, t.path.display(), t.span.start_line),
-        GraphNode::Interface(i) => {
-            format!("{} ({}:{})", i.name, i.path.display(), i.span.start_line)
-        }
-        GraphNode::Enum(e) => format!("{} ({}:{})", e.name, e.path.display(), e.span.start_line),
-        GraphNode::Variable(v) => format!("{} ({}:{})", v.name, v.path.display(), v.line_number),
-        _ => format!("{} [{}]", node.name(), node.label()),
+        GraphNode::Function(f) => format!("{}(fn)({}:{})", f.name, f.path.display(), f.span.start_line),
+        GraphNode::Class(c) => format!("{}(c)({}:{})", c.name, c.path.display(), c.span.start_line),
+        GraphNode::Struct(s) => format!("{}(s)({}:{})", s.name, s.path.display(), s.span.start_line),
+        GraphNode::Trait(t) => format!("{}(t)({}:{})", t.name, t.path.display(), t.span.start_line),
+        GraphNode::Interface(i) => format!("{}(i)({}:{})", i.name, i.path.display(), i.span.start_line),
+        GraphNode::Enum(e) => format!("{}(e)({}:{})", e.name, e.path.display(), e.span.start_line),
+        GraphNode::Variable(v) => format!("{}(v)({}:{})", v.name, v.path.display(), v.line_number),
+        _ => format!("{}({})", node.name(), label_acronym),
     }
 }

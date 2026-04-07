@@ -90,10 +90,11 @@ impl GraphBuilder {
                 .unwrap_or("")
                 .to_string();
             if !stem.is_empty() {
+                let rel = file_path.strip_prefix(&root_path).unwrap_or(file_path);
                 imports_map
                     .entry(stem)
                     .or_default()
-                    .push(file_path.to_string_lossy().to_string());
+                    .push(rel.to_string_lossy().to_string());
             }
         }
 
@@ -135,7 +136,8 @@ impl GraphBuilder {
                         return None;
                     }
                 };
-                match parser.parse(file_path, &source, false) {
+                let relative_path = file_path.strip_prefix(&root_path).unwrap_or(file_path);
+                match parser.parse(relative_path, &source, false) {
                     Ok(mut result) => {
                         if annotate_sources {
                             annotate::annotate_sources(&source, &mut result);
@@ -174,7 +176,7 @@ impl GraphBuilder {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string(),
-            path: root_path.clone(),
+            path: PathBuf::from("."),
             is_dependency: false,
         }));
 
@@ -203,7 +205,7 @@ impl GraphBuilder {
             // Create directory hierarchy
             let parent_parts: Vec<_> = rel.parent().map(|p| p.components().collect()).unwrap_or_default();
             let mut current_parent_idx = repo_idx;
-            let mut current_dir_path = root_path.clone();
+            let mut current_dir_path = PathBuf::new();
 
             for component in &parent_parts {
                 let part = component.as_os_str().to_string_lossy().to_string();

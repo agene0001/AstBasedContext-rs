@@ -1,6 +1,6 @@
 [package]
 name = "ast_context"
-version = "0.1.6"
+version = "0.1.9"
 edition = "2021"
 description = "AST/CST-based code graph analysis — index codebases, find dead code, detect redundancy, and expose everything via an MCP server for AI assistants"
 license = "MIT"
