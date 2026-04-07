@@ -46,12 +46,20 @@ pub fn run(mcp_path: Option<PathBuf>, dry_run: bool) {
             }
             DetectResult::ConfigFound(config_path) => {
                 if dry_run {
-                    println!("  [~] {} — would configure: {}", target.name(), config_path.display());
+                    println!(
+                        "  [~] {} — would configure: {}",
+                        target.name(),
+                        config_path.display()
+                    );
                     configured += 1;
                 } else {
                     match target.configure(&config_path, &mcp_bin) {
                         Ok(()) => {
-                            println!("  [✓] {} — configured: {}", target.name(), config_path.display());
+                            println!(
+                                "  [✓] {} — configured: {}",
+                                target.name(),
+                                config_path.display()
+                            );
                             configured += 1;
                         }
                         Err(e) => {
@@ -62,7 +70,11 @@ pub fn run(mcp_path: Option<PathBuf>, dry_run: bool) {
             }
             DetectResult::UseCommand => {
                 if dry_run {
-                    println!("  [~] {} — would run: {}", target.name(), target.configure_command(&mcp_bin));
+                    println!(
+                        "  [~] {} — would run: {}",
+                        target.name(),
+                        target.configure_command(&mcp_bin)
+                    );
                     configured += 1;
                 } else {
                     match target.run_configure_command(&mcp_bin) {
@@ -81,7 +93,10 @@ pub fn run(mcp_path: Option<PathBuf>, dry_run: bool) {
 
     println!();
     if dry_run {
-        println!("Would configure {} target(s), {} already set up.", configured, skipped);
+        println!(
+            "Would configure {} target(s), {} already set up.",
+            configured, skipped
+        );
     } else if configured == 0 && skipped == 0 {
         println!(
             "No supported editors detected.\n\
@@ -106,16 +121,16 @@ fn resolve_mcp_binary(override_path: Option<PathBuf>) -> Option<PathBuf> {
         if p.exists() {
             return Some(p);
         }
-        eprintln!("Warning: specified --mcp-path does not exist: {}", p.display());
+        eprintln!(
+            "Warning: specified --mcp-path does not exist: {}",
+            p.display()
+        );
         return None;
     }
 
     // 1. ~/.cargo/bin/ast_context[.exe]
     if let Some(home) = dirs::home_dir() {
-        let bin = home
-            .join(".cargo")
-            .join("bin")
-            .join(ast_context_exe_name());
+        let bin = home.join(".cargo").join("bin").join(ast_context_exe_name());
         if bin.exists() {
             return Some(bin);
         }
@@ -131,14 +146,22 @@ fn resolve_mcp_binary(override_path: Option<PathBuf>) -> Option<PathBuf> {
 }
 
 fn ast_context_exe_name() -> &'static str {
-    if cfg!(windows) { "ast_context.exe" } else { "ast_context" }
+    if cfg!(windows) {
+        "ast_context.exe"
+    } else {
+        "ast_context"
+    }
 }
 
 fn which_ast_context() -> Option<PathBuf> {
     std::env::var_os("PATH").and_then(|path_var| {
         std::env::split_paths(&path_var).find_map(|dir| {
             let candidate = dir.join(ast_context_exe_name());
-            if candidate.exists() { Some(candidate) } else { None }
+            if candidate.exists() {
+                Some(candidate)
+            } else {
+                None
+            }
         })
     })
 }
@@ -158,7 +181,9 @@ trait McpTarget {
     fn configure(&self, _config_path: &Path, _mcp_bin: &Path) -> Result<(), String> {
         Err("this target does not use file-based configuration".into())
     }
-    fn configure_command(&self, _mcp_bin: &Path) -> String { String::new() }
+    fn configure_command(&self, _mcp_bin: &Path) -> String {
+        String::new()
+    }
     fn run_configure_command(&self, _mcp_bin: &Path) -> Result<(), String> {
         Err("not supported".into())
     }
@@ -181,7 +206,9 @@ fn all_targets() -> Vec<Box<dyn McpTarget>> {
 struct ClaudeDesktop;
 
 impl McpTarget for ClaudeDesktop {
-    fn name(&self) -> &'static str { "Claude Desktop" }
+    fn name(&self) -> &'static str {
+        "Claude Desktop"
+    }
 
     fn detect(&self) -> DetectResult {
         let Some(config_path) = claude_desktop_config_path() else {
@@ -200,11 +227,15 @@ impl McpTarget for ClaudeDesktop {
 
     fn configure(&self, config_path: &Path, mcp_bin: &Path) -> Result<(), String> {
         let mut root = read_or_empty_object(config_path)?;
-        let root_obj = root.as_object_mut().ok_or("config root is not a JSON object")?;
+        let root_obj = root
+            .as_object_mut()
+            .ok_or("config root is not a JSON object")?;
         let servers = root_obj
             .entry("mcpServers")
             .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-        let map = servers.as_object_mut().ok_or("mcpServers is not an object")?;
+        let map = servers
+            .as_object_mut()
+            .ok_or("mcpServers is not an object")?;
         map.insert(
             "ast-context".into(),
             serde_json::json!({
@@ -242,7 +273,9 @@ fn claude_desktop_config_path() -> Option<PathBuf> {
 struct ClaudeCode;
 
 impl McpTarget for ClaudeCode {
-    fn name(&self) -> &'static str { "Claude Code" }
+    fn name(&self) -> &'static str {
+        "Claude Code"
+    }
 
     fn detect(&self) -> DetectResult {
         // Claude Code is present if the `claude` CLI is in PATH.
@@ -270,7 +303,13 @@ impl McpTarget for ClaudeCode {
 
     fn run_configure_command(&self, mcp_bin: &Path) -> Result<(), String> {
         let status = std::process::Command::new("claude")
-            .args(["mcp", "add", "ast-context", &mcp_bin.to_string_lossy(), "mcp"])
+            .args([
+                "mcp",
+                "add",
+                "ast-context",
+                &mcp_bin.to_string_lossy(),
+                "mcp",
+            ])
             .status()
             .map_err(|e| format!("failed to run `claude mcp add`: {e}"))?;
         if status.success() {
@@ -286,7 +325,9 @@ impl McpTarget for ClaudeCode {
 struct Zed;
 
 impl McpTarget for Zed {
-    fn name(&self) -> &'static str { "Zed" }
+    fn name(&self) -> &'static str {
+        "Zed"
+    }
 
     fn detect(&self) -> DetectResult {
         let Some(config_path) = zed_settings_path() else {
@@ -307,11 +348,15 @@ impl McpTarget for Zed {
 
     fn configure(&self, config_path: &Path, mcp_bin: &Path) -> Result<(), String> {
         let mut root = read_or_empty_object(config_path)?;
-        let root_obj = root.as_object_mut().ok_or("config root is not a JSON object")?;
+        let root_obj = root
+            .as_object_mut()
+            .ok_or("config root is not a JSON object")?;
         let servers = root_obj
             .entry("context_servers")
             .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-        let map = servers.as_object_mut().ok_or("context_servers is not an object")?;
+        let map = servers
+            .as_object_mut()
+            .ok_or("context_servers is not an object")?;
         map.insert(
             "ast-context".into(),
             serde_json::json!({
@@ -341,7 +386,9 @@ fn zed_settings_path() -> Option<PathBuf> {
 struct Cursor;
 
 impl McpTarget for Cursor {
-    fn name(&self) -> &'static str { "Cursor" }
+    fn name(&self) -> &'static str {
+        "Cursor"
+    }
 
     fn detect(&self) -> DetectResult {
         let Some(config_path) = cursor_mcp_path() else {
@@ -360,11 +407,15 @@ impl McpTarget for Cursor {
 
     fn configure(&self, config_path: &Path, mcp_bin: &Path) -> Result<(), String> {
         let mut root = read_or_empty_object(config_path)?;
-        let root_obj = root.as_object_mut().ok_or("config root is not a JSON object")?;
+        let root_obj = root
+            .as_object_mut()
+            .ok_or("config root is not a JSON object")?;
         let servers = root_obj
             .entry("mcpServers")
             .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-        let map = servers.as_object_mut().ok_or("mcpServers is not an object")?;
+        let map = servers
+            .as_object_mut()
+            .ok_or("mcpServers is not an object")?;
         map.insert(
             "ast-context".into(),
             serde_json::json!({
@@ -385,7 +436,9 @@ fn cursor_mcp_path() -> Option<PathBuf> {
 struct Windsurf;
 
 impl McpTarget for Windsurf {
-    fn name(&self) -> &'static str { "Windsurf" }
+    fn name(&self) -> &'static str {
+        "Windsurf"
+    }
 
     fn detect(&self) -> DetectResult {
         let Some(config_path) = windsurf_mcp_path() else {
@@ -404,11 +457,15 @@ impl McpTarget for Windsurf {
 
     fn configure(&self, config_path: &Path, mcp_bin: &Path) -> Result<(), String> {
         let mut root = read_or_empty_object(config_path)?;
-        let root_obj = root.as_object_mut().ok_or("config root is not a JSON object")?;
+        let root_obj = root
+            .as_object_mut()
+            .ok_or("config root is not a JSON object")?;
         let servers = root_obj
             .entry("mcpServers")
             .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-        let map = servers.as_object_mut().ok_or("mcpServers is not an object")?;
+        let map = servers
+            .as_object_mut()
+            .ok_or("mcpServers is not an object")?;
         map.insert(
             "ast-context".into(),
             serde_json::json!({
@@ -421,9 +478,7 @@ impl McpTarget for Windsurf {
 }
 
 fn windsurf_mcp_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| {
-        h.join(".codeium").join("windsurf").join("mcp_config.json")
-    })
+    dirs::home_dir().map(|h| h.join(".codeium").join("windsurf").join("mcp_config.json"))
 }
 
 // ── VS Code (GitHub Copilot) ──────────────────────────────────────────────────
@@ -431,7 +486,9 @@ fn windsurf_mcp_path() -> Option<PathBuf> {
 struct VsCode;
 
 impl McpTarget for VsCode {
-    fn name(&self) -> &'static str { "VS Code (GitHub Copilot)" }
+    fn name(&self) -> &'static str {
+        "VS Code (GitHub Copilot)"
+    }
 
     fn detect(&self) -> DetectResult {
         let Some(config_path) = vscode_mcp_path() else {
@@ -440,9 +497,7 @@ impl McpTarget for VsCode {
         if which("code").is_none() && !config_path.parent().is_some_and(|p| p.exists()) {
             return DetectResult::NotInstalled;
         }
-        if config_path.exists()
-            && json_has_ast_context(&config_path, &["servers", "ast-context"])
-        {
+        if config_path.exists() && json_has_ast_context(&config_path, &["servers", "ast-context"]) {
             return DetectResult::AlreadyConfigured;
         }
         DetectResult::ConfigFound(config_path)
@@ -450,9 +505,13 @@ impl McpTarget for VsCode {
 
     fn configure(&self, config_path: &Path, mcp_bin: &Path) -> Result<(), String> {
         let mut root = read_or_empty_object(config_path)?;
-        let root_obj = root.as_object_mut().ok_or("config root is not a JSON object")?;
+        let root_obj = root
+            .as_object_mut()
+            .ok_or("config root is not a JSON object")?;
         // VS Code mcp.json uses "inputs" + "servers" (not "mcpServers")
-        root_obj.entry("inputs").or_insert_with(|| serde_json::json!([]));
+        root_obj
+            .entry("inputs")
+            .or_insert_with(|| serde_json::json!([]));
         let servers = root_obj
             .entry("servers")
             .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
@@ -495,7 +554,9 @@ fn vscode_mcp_path() -> Option<PathBuf> {
 struct JetBrains;
 
 impl McpTarget for JetBrains {
-    fn name(&self) -> &'static str { "JetBrains IDEs" }
+    fn name(&self) -> &'static str {
+        "JetBrains IDEs"
+    }
 
     fn detect(&self) -> DetectResult {
         let dirs = jetbrains_config_dirs();
@@ -539,11 +600,15 @@ impl McpTarget for JetBrains {
 
 fn configure_jetbrains_mcp(config_path: &Path, mcp_bin: &Path) -> Result<(), String> {
     let mut root = read_or_empty_object(config_path)?;
-    let root_obj = root.as_object_mut().ok_or("config root is not a JSON object")?;
+    let root_obj = root
+        .as_object_mut()
+        .ok_or("config root is not a JSON object")?;
     let servers = root_obj
         .entry("mcpServers")
         .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-    let map = servers.as_object_mut().ok_or("mcpServers is not an object")?;
+    let map = servers
+        .as_object_mut()
+        .ok_or("mcpServers is not an object")?;
     map.insert(
         "ast-context".into(),
         serde_json::json!({
@@ -562,7 +627,9 @@ fn jetbrains_config_dirs() -> Vec<PathBuf> {
     if !base.exists() {
         return Vec::new();
     }
-    let Ok(entries) = std::fs::read_dir(&base) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(&base) else {
+        return Vec::new();
+    };
     let mut dirs: Vec<PathBuf> = entries
         .flatten()
         .filter_map(|e| {
@@ -582,7 +649,9 @@ fn jetbrains_base_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         dirs::home_dir().map(|h| {
-            h.join("Library").join("Application Support").join("JetBrains")
+            h.join("Library")
+                .join("Application Support")
+                .join("JetBrains")
         })
     }
     #[cfg(target_os = "windows")]
@@ -603,12 +672,106 @@ fn read_or_empty_object(path: &Path) -> Result<serde_json::Value, String> {
     }
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-    let trimmed = content.trim();
+
+    let stripped = strip_json_comments(&content);
+    let no_commas = strip_trailing_commas(&stripped);
+    let trimmed = no_commas.trim();
+
     if trimmed.is_empty() {
         return Ok(serde_json::Value::Object(serde_json::Map::new()));
     }
-    serde_json::from_str(trimmed)
-        .map_err(|e| format!("failed to parse {}: {e}", path.display()))
+    serde_json::from_str(trimmed).map_err(|e| format!("failed to parse {}: {e}", path.display()))
+}
+
+fn strip_trailing_commas(json: &str) -> String {
+    let mut out = String::with_capacity(json.len());
+    let mut chars = json.chars().peekable();
+    let mut in_string = false;
+
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            if c == '\\' {
+                if let Some(next) = chars.next() {
+                    out.push(next);
+                }
+            } else if c == '"' {
+                in_string = false;
+            }
+        } else {
+            if c == '"' {
+                in_string = true;
+                out.push(c);
+            } else if c == '}' || c == ']' {
+                let mut pop_count = 0;
+                let mut found_comma = false;
+                for ch in out.chars().rev() {
+                    if ch.is_whitespace() {
+                        pop_count += ch.len_utf8();
+                    } else if ch == ',' {
+                        found_comma = true;
+                        pop_count += ch.len_utf8();
+                        break;
+                    } else {
+                        break;
+                    }
+                }
+                if found_comma {
+                    let new_len = out.len() - pop_count;
+                    out.truncate(new_len);
+                }
+                out.push(c);
+            } else {
+                out.push(c);
+            }
+        }
+    }
+    out
+}
+
+fn strip_json_comments(json: &str) -> String {
+    let mut out = String::with_capacity(json.len());
+    let mut chars = json.chars().peekable();
+    let mut in_string = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            if c == '\\' {
+                if let Some(next) = chars.next() {
+                    out.push(next);
+                }
+            } else if c == '"' {
+                in_string = false;
+            }
+        } else if in_line_comment {
+            if c == '\n' {
+                in_line_comment = false;
+                out.push(c);
+            }
+        } else if in_block_comment {
+            if c == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                in_block_comment = false;
+            }
+        } else {
+            if c == '"' {
+                in_string = true;
+                out.push(c);
+            } else if c == '/' && chars.peek() == Some(&'/') {
+                chars.next();
+                in_line_comment = true;
+            } else if c == '/' && chars.peek() == Some(&'*') {
+                chars.next();
+                in_block_comment = true;
+            } else {
+                out.push(c);
+            }
+        }
+    }
+    out
 }
 
 fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), String> {
@@ -618,14 +781,17 @@ fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), String> {
     }
     let content = serde_json::to_string_pretty(value)
         .map_err(|e| format!("failed to serialise JSON: {e}"))?;
-    std::fs::write(path, content)
-        .map_err(|e| format!("failed to write {}: {e}", path.display()))
+    std::fs::write(path, content).map_err(|e| format!("failed to write {}: {e}", path.display()))
 }
 
 /// Return true if the JSON at `path` already has a non-null value at the given key path.
 fn json_has_ast_context(path: &Path, key_path: &[&str]) -> bool {
-    let Ok(content) = std::fs::read_to_string(path) else { return false };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else { return false };
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
     let mut current = &value;
     for key in key_path {
         match current.get(key) {
@@ -637,11 +803,19 @@ fn json_has_ast_context(path: &Path, key_path: &[&str]) -> bool {
 }
 
 fn which(binary: &str) -> Option<PathBuf> {
-    let exe = if cfg!(windows) { format!("{binary}.exe") } else { binary.to_string() };
+    let exe = if cfg!(windows) {
+        format!("{binary}.exe")
+    } else {
+        binary.to_string()
+    };
     std::env::var_os("PATH").and_then(|path_var| {
         std::env::split_paths(&path_var).find_map(|dir| {
             let candidate = dir.join(&exe);
-            if candidate.exists() { Some(candidate) } else { None }
+            if candidate.exists() {
+                Some(candidate)
+            } else {
+                None
+            }
         })
     })
 }
