@@ -259,7 +259,7 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                     },
                     "limit_per_type": {
                         "type": "integer",
-                        "description": "Maximum number of findings to return per redundancy type (default: 0 = all)"
+                        "description": "Maximum number of findings to return per redundancy type (default: 10, 0 = all)"
                     },
                     "limit": {
                         "type": "string",
@@ -1095,7 +1095,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         .get("limit_per_type")
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)
-        .unwrap_or(0);
+        .unwrap_or(10);
     let limit = args
         .get("limit")
         .and_then(|v| v.as_u64())
@@ -1311,12 +1311,21 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                 let node_idx = petgraph::graph::NodeIndex::new(ni);
                 if let Some(node) = graph.get_node(node_idx) {
                     let loc = node.location();
-                    let loc_str = if loc.0.is_empty() {
+                    let path_str = std::env::current_dir()
+                        .ok()
+                        .and_then(|cwd| {
+                            std::path::Path::new(&loc.0)
+                                .strip_prefix(&cwd)
+                                .ok()
+                                .map(|p| p.display().to_string())
+                        })
+                        .unwrap_or_else(|| loc.0.clone());
+                    let loc_str = if path_str.is_empty() {
                         "".to_string()
                     } else if loc.1 > 0 {
-                        format!(" ({}:{})", loc.0, loc.1)
+                        format!(" ({}:{})", path_str, loc.1)
                     } else {
-                        format!(" ({})", loc.0)
+                        format!(" ({})", path_str)
                     };
                     text.push_str(&format!("  {} [{}]{loc_str}\n", node.name(), node.label()));
 
