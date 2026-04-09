@@ -1191,7 +1191,7 @@ pub(super) fn detect_unstable_dependency(
     // Build file stem → file_caller_count lookup for module resolution
     let file_stem_to_path: HashMap<String, (String, String)> = file_caller_count
         .iter()
-        .filter_map(|(path, &count)| {
+        .filter_map(|(path, &_count)| {
             let p = std::path::Path::new(path);
             let stem = p.file_stem()?.to_string_lossy().to_string();
             let name = p.file_name()?.to_string_lossy().to_string();

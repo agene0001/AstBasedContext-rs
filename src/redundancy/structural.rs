@@ -1,6 +1,5 @@
 use crate::types::EdgeKind;
 use crate::types::node::GraphNode;
-use petgraph::visit::EdgeRef;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
