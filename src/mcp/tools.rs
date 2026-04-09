@@ -1040,7 +1040,7 @@ fn handle_find_similar(state: &SharedState, args: &serde_json::Value) -> ToolRes
             for (_, node) in group {
                 text.push_str(&format!(
                     "  [{}] {}\n",
-                    node.label(),
+                    node.short_label(),
                     format_node_brief(node)
                 ));
                 if let Some(src) = node.source_snippet() {
@@ -1197,110 +1197,223 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
             filtered
         };
 
+        // Emit a compact legend so the LLM knows what each code means.
+        // Only include codes that actually appear in this result set.
+        {
+            use std::collections::BTreeSet;
+            let used_tags: BTreeSet<&str> = display_filtered.iter().map(|f| match &f.kind {
+                FindingKind::Passthrough { .. } => "P=passthrough",
+                FindingKind::NearDuplicate { .. } => "ND=near-dup",
+                FindingKind::StructurallySimilar { .. } => "S=similar",
+                FindingKind::MergeCandidate { .. } => "M=merge",
+                FindingKind::SplitCandidate { .. } => "SP=split",
+                FindingKind::OverlappingStructs { .. } => "SO=struct-overlap",
+                FindingKind::OverlappingEnums { .. } => "EO=enum-overlap",
+                FindingKind::SuggestParameterStruct { .. } => "SS=suggest-struct",
+                FindingKind::SuggestEnumDispatch { .. } => "SED=suggest-enum",
+                FindingKind::SuggestTraitExtraction { .. } => "STE=suggest-trait",
+                FindingKind::SuggestFacade { .. } => "FAC=facade",
+                FindingKind::SuggestFactory { .. } => "FTY=factory",
+                FindingKind::SuggestBuilder { .. } => "SB=builder",
+                FindingKind::SuggestStrategy { .. } => "STR=strategy",
+                FindingKind::SuggestTemplateMethod { .. } => "TM=template-method",
+                FindingKind::SuggestObserver { .. } => "OBS=observer",
+                FindingKind::SuggestDecorator { .. } => "SD=decorator",
+                FindingKind::SuggestMediator { .. } => "MED=mediator",
+                FindingKind::GodClass { .. } => "GC=god-class",
+                FindingKind::CircularDependency { .. } => "CD=circular-dep",
+                FindingKind::FeatureEnvy { .. } => "FE=feature-envy",
+                FindingKind::ShotgunSurgery { .. } => "SG=shotgun-surgery",
+                FindingKind::DetectedSingleton { .. } => "SNG=singleton",
+                FindingKind::DetectedAdapter { .. } => "ADP=adapter",
+                FindingKind::DetectedProxy { .. } => "PRX=proxy",
+                FindingKind::DetectedCommand { .. } => "CMD=command",
+                FindingKind::DetectedChainOfResponsibility { .. } => "COR=chain-of-resp",
+                FindingKind::DetectedDependencyInjection { .. } => "DI=dep-injection",
+                FindingKind::DeadCode { .. } => "DC=dead-code",
+                FindingKind::LongParameterList { .. } => "LP=long-params",
+                FindingKind::DataClump { .. } => "DK=data-clump",
+                FindingKind::MiddleMan { .. } => "MM=middle-man",
+                FindingKind::LazyClass { .. } => "LZ=lazy-class",
+                FindingKind::RefusedBequest { .. } => "RB=refused-bequest",
+                FindingKind::SpeculativeGenerality { .. } => "SPG=speculative-generality",
+                FindingKind::InappropriateIntimacy { .. } => "II=inappropriate-intimacy",
+                FindingKind::DeepNesting { .. } => "DN=deep-nesting",
+                FindingKind::DetectedVisitor { .. } => "VIS=visitor",
+                FindingKind::DetectedIterator { .. } => "ITR=iterator",
+                FindingKind::DetectedState { .. } => "STA=state",
+                FindingKind::DetectedComposite { .. } => "CMP=composite",
+                FindingKind::DetectedRepository { .. } => "R=repository",
+                FindingKind::DetectedPrototype { .. } => "PRT=prototype",
+                FindingKind::HubModule { .. } => "HM=hub-module",
+                FindingKind::OrphanModule { .. } => "OM=orphan-module",
+                FindingKind::DivergentChange { .. } => "DV=divergent-change",
+                FindingKind::ParallelInheritance { .. } => "PI=parallel-inherit",
+                FindingKind::PrimitiveObsession { .. } => "PO=primitive-obsession",
+                FindingKind::LargeClass { .. } => "LCL=large-class",
+                FindingKind::UnstableDependency { .. } => "UD=unstable-dep",
+                FindingKind::DetectedFlyweight { .. } => "FLY=flyweight",
+                FindingKind::DetectedEventEmitter { .. } => "EE=event-emitter",
+                FindingKind::DetectedMemento { .. } => "MEM=memento",
+                FindingKind::DetectedFluentBuilder { .. } => "FB=fluent-builder",
+                FindingKind::DetectedNullObject { .. } => "NO=null-object",
+                FindingKind::InconsistentNaming { .. } => "IN=inconsistent-naming",
+                FindingKind::CircularPackageDependency { .. } => "CPD=circular-pkg-dep",
+                FindingKind::SuggestSumType { .. } => "SST=sum-type",
+                FindingKind::SuggestEnumFromHierarchy { .. } => "HTE=hierarchy-to-enum",
+                FindingKind::BooleanBlindness { .. } => "BB=bool-blindness",
+                FindingKind::SuggestNewtype { .. } => "SN=newtype",
+                FindingKind::SuggestSealedType { .. } => "SEL=sealed-type",
+                FindingKind::LargeProductType { .. } => "LPT=large-product-type",
+                FindingKind::AnemicDomainModel { .. } => "AM=anemic-model",
+                FindingKind::MagicNumber { .. } => "MN=magic-number",
+                FindingKind::MutableGlobalState { .. } => "MG=mutable-global",
+                FindingKind::EmptyCatch { .. } => "EC=empty-catch",
+                FindingKind::CallbackHell { .. } => "CH=callback-hell",
+                FindingKind::ApiInconsistency { .. } => "AI=api-inconsistency",
+                FindingKind::LackOfCohesion { .. } => "LC=low-cohesion",
+                FindingKind::HighCoupling { .. } => "HC=high-coupling",
+                FindingKind::ModuleInstability { .. } => "UM=unstable-module",
+                FindingKind::HighCognitiveComplexity { .. } => "CC=cognitive-complexity",
+                FindingKind::HighRiskFunction { .. } => "HRF=high-risk-fn",
+                FindingKind::HighRiskFile { .. } => "HRL=high-risk-file",
+                FindingKind::UntestedPublicFunction { .. } => "UP=untested-public",
+                FindingKind::LowTestRatio { .. } => "LTR=low-test-ratio",
+                FindingKind::IntegrationTestSmell { .. } => "IS=integration-smell",
+                FindingKind::HighBlastRadius { .. } => "HBR=high-blast-radius",
+                FindingKind::MisplacedFunction { .. } => "MF=misplaced-fn",
+                FindingKind::ImplicitModule { .. } => "IM=implicit-module",
+                FindingKind::UnstablePublicApi { .. } => "UPA=unstable-api",
+                FindingKind::UndocumentedPublicApi { .. } => "UA=undocumented-api",
+                FindingKind::LeakyAbstraction { .. } => "LA=leaky-abstraction",
+                FindingKind::FfiBoundary { .. } => "FFI=ffi-boundary",
+                FindingKind::SubprocessCall { .. } => "SUB=subprocess",
+                FindingKind::IpcBoundary { .. } => "IPC=ipc-boundary",
+                FindingKind::EnvVarUsage { .. } => "EV=env-var",
+                FindingKind::HardcodedEndpoint { .. } => "HE=hardcoded-endpoint",
+                FindingKind::FeatureFlag { .. } => "FF=feature-flag",
+                FindingKind::ConfigFileUsage { .. } => "CF=config-file",
+                FindingKind::VecUsedAsSet { .. } => "VAS=vec-as-set",
+                FindingKind::VecUsedAsMap { .. } => "VAM=vec-as-map",
+                FindingKind::LinearSearchInLoop { .. } => "LSIL=linear-search-in-loop",
+                FindingKind::StringConcatInLoop { .. } => "SCIL=string-concat-in-loop",
+                FindingKind::SortedVecForLookup { .. } => "SVL=sorted-vec-lookup",
+                FindingKind::NestedLoopLookup { .. } => "NLL=nested-loop-lookup",
+                FindingKind::HashMapWithSequentialKeys { .. } => "HSK=hashmap-seq-keys",
+                FindingKind::ExcessiveCollectIterate { .. } => "CI=collect-iterate",
+                FindingKind::UnusedImport { .. } => "UI=unused-import",
+                FindingKind::InconsistentErrorHandling { .. } => "IEH=inconsistent-error",
+                FindingKind::TechDebtComment { .. } => "TD=tech-debt",
+            }).collect();
+            text.push_str("Tiers: C=critical H=high M=medium L=low\nCodes: ");
+            text.push_str(&used_tags.into_iter().collect::<Vec<_>>().join(" "));
+            text.push_str("\n\n");
+        }
+
         for finding in &display_filtered {
             let tag = match &finding.kind {
-                FindingKind::Passthrough { .. } => "PASSTHROUGH",
-                FindingKind::NearDuplicate { .. } => "NEAR-DUPLICATE",
-                FindingKind::StructurallySimilar { .. } => "SIMILAR",
-                FindingKind::MergeCandidate { .. } => "MERGE",
-                FindingKind::SplitCandidate { .. } => "SPLIT",
-                FindingKind::OverlappingStructs { .. } => "STRUCT-OVERLAP",
-                FindingKind::OverlappingEnums { .. } => "ENUM-OVERLAP",
-                FindingKind::SuggestParameterStruct { .. } => "SUGGEST-STRUCT",
-                FindingKind::SuggestEnumDispatch { .. } => "SUGGEST-ENUM",
-                FindingKind::SuggestTraitExtraction { .. } => "SUGGEST-TRAIT",
-                FindingKind::SuggestFacade { .. } => "SUGGEST-FACADE",
-                FindingKind::SuggestFactory { .. } => "SUGGEST-FACTORY",
-                FindingKind::SuggestBuilder { .. } => "SUGGEST-BUILDER",
-                FindingKind::SuggestStrategy { .. } => "SUGGEST-STRATEGY",
-                FindingKind::SuggestTemplateMethod { .. } => "SUGGEST-TEMPLATE",
-                FindingKind::SuggestObserver { .. } => "SUGGEST-OBSERVER",
-                FindingKind::SuggestDecorator { .. } => "SUGGEST-DECORATOR",
-                FindingKind::SuggestMediator { .. } => "SUGGEST-MEDIATOR",
-                FindingKind::GodClass { .. } => "GOD-CLASS",
-                FindingKind::CircularDependency { .. } => "CIRCULAR-DEP",
-                FindingKind::FeatureEnvy { .. } => "FEATURE-ENVY",
-                FindingKind::ShotgunSurgery { .. } => "SHOTGUN-SURGERY",
-                FindingKind::DetectedSingleton { .. } => "SINGLETON",
-                FindingKind::DetectedAdapter { .. } => "ADAPTER",
-                FindingKind::DetectedProxy { .. } => "PROXY",
-                FindingKind::DetectedCommand { .. } => "COMMAND",
-                FindingKind::DetectedChainOfResponsibility { .. } => "CHAIN-OF-RESP",
+                FindingKind::Passthrough { .. } => "P",
+                FindingKind::NearDuplicate { .. } => "ND",
+                FindingKind::StructurallySimilar { .. } => "S",
+                FindingKind::MergeCandidate { .. } => "M",
+                FindingKind::SplitCandidate { .. } => "SP",
+                FindingKind::OverlappingStructs { .. } => "SO",
+                FindingKind::OverlappingEnums { .. } => "EO",
+                FindingKind::SuggestParameterStruct { .. } => "SS",
+                FindingKind::SuggestEnumDispatch { .. } => "SED",
+                FindingKind::SuggestTraitExtraction { .. } => "STE",
+                FindingKind::SuggestFacade { .. } => "FAC",
+                FindingKind::SuggestFactory { .. } => "FTY",
+                FindingKind::SuggestBuilder { .. } => "SB",
+                FindingKind::SuggestStrategy { .. } => "STR",
+                FindingKind::SuggestTemplateMethod { .. } => "TM",
+                FindingKind::SuggestObserver { .. } => "OBS",
+                FindingKind::SuggestDecorator { .. } => "SD",
+                FindingKind::SuggestMediator { .. } => "MED",
+                FindingKind::GodClass { .. } => "GC",
+                FindingKind::CircularDependency { .. } => "CD",
+                FindingKind::FeatureEnvy { .. } => "FE",
+                FindingKind::ShotgunSurgery { .. } => "SG",
+                FindingKind::DetectedSingleton { .. } => "SNG",
+                FindingKind::DetectedAdapter { .. } => "ADP",
+                FindingKind::DetectedProxy { .. } => "PRX",
+                FindingKind::DetectedCommand { .. } => "CMD",
+                FindingKind::DetectedChainOfResponsibility { .. } => "COR",
                 FindingKind::DetectedDependencyInjection { .. } => "DI",
-                FindingKind::DeadCode { .. } => "DEAD-CODE",
-                FindingKind::LongParameterList { .. } => "LONG-PARAMS",
-                FindingKind::DataClump { .. } => "DATA-CLUMP",
-                FindingKind::MiddleMan { .. } => "MIDDLE-MAN",
-                FindingKind::LazyClass { .. } => "LAZY-CLASS",
-                FindingKind::RefusedBequest { .. } => "REFUSED-BEQUEST",
-                FindingKind::SpeculativeGenerality { .. } => "SPECULATIVE-GENERALITY",
-                FindingKind::InappropriateIntimacy { .. } => "INAPPROPRIATE-INTIMACY",
-                FindingKind::DeepNesting { .. } => "DEEP-NESTING",
-                FindingKind::DetectedVisitor { .. } => "VISITOR",
-                FindingKind::DetectedIterator { .. } => "ITERATOR",
-                FindingKind::DetectedState { .. } => "STATE",
-                FindingKind::DetectedComposite { .. } => "COMPOSITE",
-                FindingKind::DetectedRepository { .. } => "REPOSITORY",
-                FindingKind::DetectedPrototype { .. } => "PROTOTYPE",
-                FindingKind::HubModule { .. } => "HUB-MODULE",
-                FindingKind::OrphanModule { .. } => "ORPHAN-MODULE",
-                FindingKind::DivergentChange { .. } => "DIVERGENT-CHANGE",
-                FindingKind::ParallelInheritance { .. } => "PARALLEL-INHERITANCE",
-                FindingKind::PrimitiveObsession { .. } => "PRIMITIVE-OBSESSION",
-                FindingKind::LargeClass { .. } => "LARGE-CLASS",
-                FindingKind::UnstableDependency { .. } => "UNSTABLE-DEP",
-                FindingKind::DetectedFlyweight { .. } => "FLYWEIGHT",
-                FindingKind::DetectedEventEmitter { .. } => "EVENT-EMITTER",
-                FindingKind::DetectedMemento { .. } => "MEMENTO",
-                FindingKind::DetectedFluentBuilder { .. } => "FLUENT-BUILDER",
-                FindingKind::DetectedNullObject { .. } => "NULL-OBJECT",
-                FindingKind::InconsistentNaming { .. } => "INCONSISTENT-NAMING",
-                FindingKind::CircularPackageDependency { .. } => "CIRCULAR-PKG-DEP",
-                FindingKind::SuggestSumType { .. } => "SUGGEST-SUM-TYPE",
-                FindingKind::SuggestEnumFromHierarchy { .. } => "HIERARCHY-TO-ENUM",
-                FindingKind::BooleanBlindness { .. } => "BOOLEAN-BLINDNESS",
-                FindingKind::SuggestNewtype { .. } => "SUGGEST-NEWTYPE",
-                FindingKind::SuggestSealedType { .. } => "SUGGEST-SEALED",
-                FindingKind::LargeProductType { .. } => "LARGE-PRODUCT-TYPE",
-                FindingKind::AnemicDomainModel { .. } => "ANEMIC-MODEL",
-                FindingKind::MagicNumber { .. } => "MAGIC-NUMBER",
-                FindingKind::MutableGlobalState { .. } => "MUTABLE-GLOBAL",
-                FindingKind::EmptyCatch { .. } => "EMPTY-CATCH",
-                FindingKind::CallbackHell { .. } => "CALLBACK-HELL",
-                FindingKind::ApiInconsistency { .. } => "API-INCONSISTENCY",
-                FindingKind::LackOfCohesion { .. } => "LOW-COHESION",
-                FindingKind::HighCoupling { .. } => "HIGH-COUPLING",
-                FindingKind::ModuleInstability { .. } => "UNSTABLE-MODULE",
-                FindingKind::HighCognitiveComplexity { .. } => "COGNITIVE-COMPLEXITY",
-                FindingKind::HighRiskFunction { .. } => "HIGH-RISK-FUNC",
-                FindingKind::HighRiskFile { .. } => "HIGH-RISK-FILE",
-                FindingKind::UntestedPublicFunction { .. } => "UNTESTED-PUBLIC",
-                FindingKind::LowTestRatio { .. } => "LOW-TEST-RATIO",
-                FindingKind::IntegrationTestSmell { .. } => "INTEGRATION-SMELL",
-                FindingKind::HighBlastRadius { .. } => "HIGH-BLAST-RADIUS",
-                FindingKind::MisplacedFunction { .. } => "MISPLACED-FUNC",
-                FindingKind::ImplicitModule { .. } => "IMPLICIT-MODULE",
-                FindingKind::UnstablePublicApi { .. } => "UNSTABLE-API",
-                FindingKind::UndocumentedPublicApi { .. } => "UNDOCUMENTED-API",
-                FindingKind::LeakyAbstraction { .. } => "LEAKY-ABSTRACTION",
-                FindingKind::FfiBoundary { .. } => "FFI-BOUNDARY",
-                FindingKind::SubprocessCall { .. } => "SUBPROCESS",
-                FindingKind::IpcBoundary { .. } => "IPC-BOUNDARY",
-                FindingKind::EnvVarUsage { .. } => "ENV-VAR",
-                FindingKind::HardcodedEndpoint { .. } => "HARDCODED-ENDPOINT",
-                FindingKind::FeatureFlag { .. } => "FEATURE-FLAG",
-                FindingKind::ConfigFileUsage { .. } => "CONFIG-FILE",
-                FindingKind::VecUsedAsSet { .. } => "VEC-AS-SET",
-                FindingKind::VecUsedAsMap { .. } => "VEC-AS-MAP",
-                FindingKind::LinearSearchInLoop { .. } => "LINEAR-SEARCH-IN-LOOP",
-                FindingKind::StringConcatInLoop { .. } => "STRING-CONCAT-IN-LOOP",
-                FindingKind::SortedVecForLookup { .. } => "SORTED-VEC-LOOKUP",
-                FindingKind::NestedLoopLookup { .. } => "NESTED-LOOP-LOOKUP",
-                FindingKind::HashMapWithSequentialKeys { .. } => "HASHMAP-SEQ-KEYS",
-                FindingKind::ExcessiveCollectIterate { .. } => "EXCESSIVE-COLLECT",
-                FindingKind::UnusedImport { .. } => "UNUSED-IMPORT",
-                FindingKind::InconsistentErrorHandling { .. } => "INCONSISTENT-ERROR-HANDLING",
-                FindingKind::TechDebtComment { .. } => "TECH-DEBT",
+                FindingKind::DeadCode { .. } => "DC",
+                FindingKind::LongParameterList { .. } => "LP",
+                FindingKind::DataClump { .. } => "DK",
+                FindingKind::MiddleMan { .. } => "MM",
+                FindingKind::LazyClass { .. } => "LZ",
+                FindingKind::RefusedBequest { .. } => "RB",
+                FindingKind::SpeculativeGenerality { .. } => "SPG",
+                FindingKind::InappropriateIntimacy { .. } => "II",
+                FindingKind::DeepNesting { .. } => "DN",
+                FindingKind::DetectedVisitor { .. } => "VIS",
+                FindingKind::DetectedIterator { .. } => "ITR",
+                FindingKind::DetectedState { .. } => "STA",
+                FindingKind::DetectedComposite { .. } => "CMP",
+                FindingKind::DetectedRepository { .. } => "R",
+                FindingKind::DetectedPrototype { .. } => "PRT",
+                FindingKind::HubModule { .. } => "HM",
+                FindingKind::OrphanModule { .. } => "OM",
+                FindingKind::DivergentChange { .. } => "DV",
+                FindingKind::ParallelInheritance { .. } => "PI",
+                FindingKind::PrimitiveObsession { .. } => "PO",
+                FindingKind::LargeClass { .. } => "LCL",
+                FindingKind::UnstableDependency { .. } => "UD",
+                FindingKind::DetectedFlyweight { .. } => "FLY",
+                FindingKind::DetectedEventEmitter { .. } => "EE",
+                FindingKind::DetectedMemento { .. } => "MEM",
+                FindingKind::DetectedFluentBuilder { .. } => "FB",
+                FindingKind::DetectedNullObject { .. } => "NO",
+                FindingKind::InconsistentNaming { .. } => "IN",
+                FindingKind::CircularPackageDependency { .. } => "CPD",
+                FindingKind::SuggestSumType { .. } => "SST",
+                FindingKind::SuggestEnumFromHierarchy { .. } => "HTE",
+                FindingKind::BooleanBlindness { .. } => "BB",
+                FindingKind::SuggestNewtype { .. } => "SN",
+                FindingKind::SuggestSealedType { .. } => "SEL",
+                FindingKind::LargeProductType { .. } => "LPT",
+                FindingKind::AnemicDomainModel { .. } => "AM",
+                FindingKind::MagicNumber { .. } => "MN",
+                FindingKind::MutableGlobalState { .. } => "MG",
+                FindingKind::EmptyCatch { .. } => "EC",
+                FindingKind::CallbackHell { .. } => "CH",
+                FindingKind::ApiInconsistency { .. } => "AI",
+                FindingKind::LackOfCohesion { .. } => "LC",
+                FindingKind::HighCoupling { .. } => "HC",
+                FindingKind::ModuleInstability { .. } => "UM",
+                FindingKind::HighCognitiveComplexity { .. } => "CC",
+                FindingKind::HighRiskFunction { .. } => "HRF",
+                FindingKind::HighRiskFile { .. } => "HRL",
+                FindingKind::UntestedPublicFunction { .. } => "UP",
+                FindingKind::LowTestRatio { .. } => "LTR",
+                FindingKind::IntegrationTestSmell { .. } => "IS",
+                FindingKind::HighBlastRadius { .. } => "HBR",
+                FindingKind::MisplacedFunction { .. } => "MF",
+                FindingKind::ImplicitModule { .. } => "IM",
+                FindingKind::UnstablePublicApi { .. } => "UPA",
+                FindingKind::UndocumentedPublicApi { .. } => "UA",
+                FindingKind::LeakyAbstraction { .. } => "LA",
+                FindingKind::FfiBoundary { .. } => "FFI",
+                FindingKind::SubprocessCall { .. } => "SUB",
+                FindingKind::IpcBoundary { .. } => "IPC",
+                FindingKind::EnvVarUsage { .. } => "EV",
+                FindingKind::HardcodedEndpoint { .. } => "HE",
+                FindingKind::FeatureFlag { .. } => "FF",
+                FindingKind::ConfigFileUsage { .. } => "CF",
+                FindingKind::VecUsedAsSet { .. } => "VAS",
+                FindingKind::VecUsedAsMap { .. } => "VAM",
+                FindingKind::LinearSearchInLoop { .. } => "LSIL",
+                FindingKind::StringConcatInLoop { .. } => "SCIL",
+                FindingKind::SortedVecForLookup { .. } => "SVL",
+                FindingKind::NestedLoopLookup { .. } => "NLL",
+                FindingKind::HashMapWithSequentialKeys { .. } => "HSK",
+                FindingKind::ExcessiveCollectIterate { .. } => "CI",
+                FindingKind::UnusedImport { .. } => "UI",
+                FindingKind::InconsistentErrorHandling { .. } => "IEH",
+                FindingKind::TechDebtComment { .. } => "TD",
             };
 
             let tier_flag = match finding.tier {
@@ -1309,9 +1422,8 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                 Tier::Medium => "M",
                 Tier::Low => "L",
             };
-            let initials: String = tag.split('-').filter_map(|s| s.chars().next()).collect();
             text.push_str(&format!(
-                "[{tier_flag}][{initials}] {}\n",
+                "[{tier_flag}][{tag}] {}\n",
                 finding.description
             ));
 
@@ -1328,7 +1440,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                         } else {
                             format!(" ({})", path_str)
                         };
-                        text.push_str(&format!("  {} [{}]{loc_str}\n", node.name(), node.label()));
+                        text.push_str(&format!("  {} [{}]{loc_str}\n", node.name(), node.short_label()));
 
                         if let Some(src) = node.source_snippet() {
                             for line in src.lines().take(5) {
@@ -1356,21 +1468,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                             format!("({})", path_str)
                         };
                         
-                        // Use acronyms for common node types to save space
-                        let label_acronym = match node.label() {
-                            "Function" => "fn",
-                            "Method" => "m",
-                            "Class" => "c",
-                            "Struct" => "s",
-                            "Trait" => "t",
-                            "Interface" => "i",
-                            "Enum" => "e",
-                            "Variable" => "v",
-                            "File" => "f",
-                            other => other,
-                        };
-                        
-                        nodes_info.push(format!("{}({}){}", node.name(), label_acronym, loc_str));
+                        nodes_info.push(format!("{}({}){}", node.name(), node.short_label(), loc_str));
                     }
                 }
                 if !nodes_info.is_empty() {
@@ -1554,7 +1652,7 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
         }
 
         let (idx, node) = &filtered[0];
-        let mut text = format!("Context for {} '{name}':\n\n", node.label());
+        let mut text = format!("Context for {} '{name}':\n\n", node.short_label());
 
         // ── Source ──────────────────────────────────────────────────────
         text.push_str("── Definition ──\n");
@@ -1656,7 +1754,7 @@ fn handle_find_references(state: &SharedState, args: &serde_json::Value) -> Tool
         }
 
         let (idx, node) = &results[0];
-        let mut text = format!("References to {} '{name}':\n\n", node.label());
+        let mut text = format!("References to {} '{name}':\n\n", node.short_label());
 
         // CALLS edges (reverse) — who calls this
         let callers = graph.get_callers_of(*idx);
@@ -1984,110 +2082,57 @@ fn ensure_gitignore(root: &std::path::Path) {
 // ── formatting helpers ───────────────────────────────────────────────────
 
 fn format_node(node: &GraphNode) -> String {
+    let sl = node.short_label();
     match node {
         GraphNode::Function(f) => {
             format!(
-                "  [Function] {} ({}:{}–{}, complexity={})",
-                f.name,
-                f.path.display(),
-                f.span.start_line,
-                f.span.end_line,
-                f.cyclomatic_complexity,
+                "  [{sl}] {} ({}:{}–{}, cc={})",
+                f.name, f.path.display(), f.span.start_line, f.span.end_line, f.cyclomatic_complexity,
             )
         }
         GraphNode::Class(c) => {
             let bases = if c.bases.is_empty() {
                 String::new()
             } else {
-                format!(" extends {}", c.bases.join(", "))
+                format!(" < {}", c.bases.join(", "))
             };
-            format!(
-                "  [Class] {}{} ({}:{}–{})",
-                c.name,
-                bases,
-                c.path.display(),
-                c.span.start_line,
-                c.span.end_line,
-            )
+            format!("  [{sl}] {}{} ({}:{}–{})", c.name, bases, c.path.display(), c.span.start_line, c.span.end_line)
         }
         GraphNode::Struct(s) => {
-            format!(
-                "  [Struct] {} ({}:{}–{})",
-                s.name,
-                s.path.display(),
-                s.span.start_line,
-                s.span.end_line,
-            )
+            format!("  [{sl}] {} ({}:{}–{})", s.name, s.path.display(), s.span.start_line, s.span.end_line)
         }
         GraphNode::Trait(t) => {
-            format!(
-                "  [Trait] {} ({}:{}–{})",
-                t.name,
-                t.path.display(),
-                t.span.start_line,
-                t.span.end_line,
-            )
+            format!("  [{sl}] {} ({}:{}–{})", t.name, t.path.display(), t.span.start_line, t.span.end_line)
         }
         GraphNode::Interface(i) => {
-            format!(
-                "  [Interface] {} ({}:{}–{})",
-                i.name,
-                i.path.display(),
-                i.span.start_line,
-                i.span.end_line,
-            )
+            format!("  [{sl}] {} ({}:{}–{})", i.name, i.path.display(), i.span.start_line, i.span.end_line)
         }
         GraphNode::Enum(e) => {
-            format!(
-                "  [Enum] {} [{}] ({}:{}–{})",
-                e.name,
-                e.variants.join(", "),
-                e.path.display(),
-                e.span.start_line,
-                e.span.end_line,
-            )
+            format!("  [{sl}] {} [{}] ({}:{}–{})", e.name, e.variants.join(", "), e.path.display(), e.span.start_line, e.span.end_line)
         }
         GraphNode::Variable(v) => {
-            format!(
-                "  [Variable] {} ({}:{})",
-                v.name,
-                v.path.display(),
-                v.line_number,
-            )
+            format!("  [{sl}] {} ({}:{})", v.name, v.path.display(), v.line_number)
         }
         GraphNode::Module(m) => {
-            format!("  [Module] {}", m.name)
+            format!("  [{sl}] {}", m.name)
         }
         GraphNode::File(f) => {
-            format!("  [File] {} ({})", f.name, f.path.display())
+            format!("  [{sl}] {} ({})", f.name, f.path.display())
         }
-        _ => format!("  [{}] {}", node.label(), node.name()),
+        _ => format!("  [{sl}] {}", node.name()),
     }
 }
 
 fn format_node_brief(node: &GraphNode) -> String {
-    let label_acronym = match node.label() {
-        "Function" => "fn",
-        "Method" => "m",
-        "Class" => "c",
-        "Struct" => "s",
-        "Trait" => "t",
-        "Interface" => "i",
-        "Enum" => "e",
-        "Variable" => "v",
-        "File" => "f",
-        "Module" => "mod",
-        other => other,
-    };
-    
+    let sl = node.short_label();
     match node {
-        GraphNode::Function(f) => format!("{}(fn)({}:{})", f.name, f.path.display(), f.span.start_line),
-        GraphNode::Class(c) => format!("{}(c)({}:{})", c.name, c.path.display(), c.span.start_line),
-        GraphNode::Struct(s) => format!("{}(s)({}:{})", s.name, s.path.display(), s.span.start_line),
-        GraphNode::Trait(t) => format!("{}(t)({}:{})", t.name, t.path.display(), t.span.start_line),
-        GraphNode::Interface(i) => format!("{}(i)({}:{})", i.name, i.path.display(), i.span.start_line),
-        GraphNode::Enum(e) => format!("{}(e)({}:{})", e.name, e.path.display(), e.span.start_line),
-        GraphNode::Variable(v) => format!("{}(v)({}:{})", v.name, v.path.display(), v.line_number),
-        _ => format!("{}({})", node.name(), label_acronym),
+        GraphNode::Function(f) => format!("{}({sl})({}:{})", f.name, f.path.display(), f.span.start_line),
+        GraphNode::Class(c) => format!("{}({sl})({}:{})", c.name, c.path.display(), c.span.start_line),
+        GraphNode::Struct(s) => format!("{}({sl})({}:{})", s.name, s.path.display(), s.span.start_line),
+        GraphNode::Trait(t) => format!("{}({sl})({}:{})", t.name, t.path.display(), t.span.start_line),
+        GraphNode::Interface(i) => format!("{}({sl})({}:{})", i.name, i.path.display(), i.span.start_line),
+        GraphNode::Enum(e) => format!("{}({sl})({}:{})", e.name, e.path.display(), e.span.start_line),
+        GraphNode::Variable(v) => format!("{}({sl})({}:{})", v.name, v.path.display(), v.line_number),
+        _ => format!("{}({sl})", node.name()),
     }
 }

@@ -142,14 +142,29 @@ impl RustParser {
                 let args = extract_rust_params(params_node.as_ref(), source);
                 let complexity = calculate_cyclomatic_complexity(&func_node, RUST_COMPLEXITY_KINDS);
 
-                let ctx = get_parent_context(
-                    &func_node,
-                    source,
-                    &["function_item", "impl_item", "trait_item"],
-                );
+                // For Rust, manually extract impl block info since impl_item
+                // uses `type` and `trait` fields, not `name`.
+                let (impl_type_name, impl_trait_name) = extract_impl_context(&func_node, source);
 
-                // For Rust, class_context maps to the impl block's type
-                let class_ctx = get_parent_context(&func_node, source, &["impl_item"]);
+                // Build the general context: prefer trait name (for trait impls),
+                // then fall back to enclosing function/trait_item context.
+                let ctx = if impl_trait_name.is_some() {
+                    // Inside `impl Trait for Type` — context is the trait name
+                    impl_trait_name.as_ref().map(|t| (t.clone(), "impl_item".to_string(), func_node.start_position().row as u32 + 1))
+                } else if impl_type_name.is_some() {
+                    // Inside `impl Type` — context is the type name
+                    impl_type_name.as_ref().map(|t| (t.clone(), "impl_item".to_string(), func_node.start_position().row as u32 + 1))
+                } else {
+                    // Not in an impl block — fall back to normal parent context
+                    get_parent_context(
+                        &func_node,
+                        source,
+                        &["function_item", "trait_item"],
+                    )
+                };
+
+                // class_context maps to the impl block's type name
+                let class_ctx = impl_type_name;
 
                 let arg_types = extract_rust_param_types(params_node.as_ref(), source);
                 let return_type = func_node
@@ -208,7 +223,7 @@ impl RustParser {
                     decorators: Vec::new(), // Rust uses attributes, not decorators
                     context: ctx.as_ref().map(|(n, _, _)| n.clone()),
                     context_type: ctx.as_ref().map(|(_, t, _)| t.clone()),
-                    class_context: class_ctx.map(|(n, _, _)| n),
+                    class_context: class_ctx,
                     language: Language::Rust,
                     is_dependency: false,
                     source: None,
@@ -435,12 +450,11 @@ impl RustParser {
                     .child_by_field_name("type")
                     .map(|t| get_node_text(&t, source).to_string());
 
-                let ctx = get_parent_context(
-                    &node,
-                    source,
-                    &["function_item", "impl_item", "trait_item"],
-                );
-                let class_ctx = get_parent_context(&node, source, &["impl_item"]);
+                let (impl_type, _) = extract_impl_context(&node, source);
+                let ctx = impl_type.clone().or_else(|| {
+                    get_parent_context(&node, source, &["function_item", "trait_item"])
+                        .map(|(n, _, _)| n)
+                });
 
                 variables.push(VariableData {
                     name,
@@ -448,8 +462,8 @@ impl RustParser {
                     line_number: node.start_position().row as u32 + 1,
                     value,
                     type_annotation,
-                    context: ctx.map(|(n, _, _)| n),
-                    class_context: class_ctx.map(|(n, _, _)| n),
+                    context: ctx,
+                    class_context: impl_type,
                     language: Language::Rust,
                     is_dependency: false,
                 });
@@ -521,7 +535,19 @@ fn extract_rust_params(params_node: Option<&Node>, source: &[u8]) -> Vec<String>
     loop {
         let child = cursor.node();
         match child.kind() {
-            "parameter" | "self_parameter" => {
+            "parameter" => {
+                // Extract just the pattern (name), not the full "name: Type" text.
+                // The `pattern` field contains the identifier for simple params.
+                let name = child
+                    .child_by_field_name("pattern")
+                    .map(|p| get_node_text(&p, source).to_string())
+                    .unwrap_or_else(|| get_node_text(&child, source).to_string());
+                if !name.is_empty() {
+                    args.push(name);
+                }
+            }
+            "self_parameter" => {
+                // self / &self / &mut self — use full text
                 let text = get_node_text(&child, source).to_string();
                 if !text.is_empty() {
                     args.push(text);
@@ -709,6 +735,28 @@ fn count_comment_nodes(root: &Node) -> usize {
         }
     }
     count
+}
+
+/// Walk up from a node to find the enclosing `impl_item` and extract:
+/// - The type being implemented (from the `type` field)
+/// - The trait being implemented, if any (from the `trait` field in `impl Trait for Type`)
+///
+/// Returns `(impl_type_name, impl_trait_name)`.
+fn extract_impl_context(node: &Node, source: &[u8]) -> (Option<String>, Option<String>) {
+    let mut curr = node.parent();
+    while let Some(parent) = curr {
+        if parent.kind() == "impl_item" {
+            let type_name = parent
+                .child_by_field_name("type")
+                .map(|t| get_node_text(&t, source).to_string());
+            let trait_name = parent
+                .child_by_field_name("trait")
+                .map(|t| get_node_text(&t, source).to_string());
+            return (type_name, trait_name);
+        }
+        curr = parent.parent();
+    }
+    (None, None)
 }
 
 /// Pre-scan Rust files to build an imports_map: name -> list of file paths.

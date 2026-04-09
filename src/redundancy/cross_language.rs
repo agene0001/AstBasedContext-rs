@@ -52,7 +52,7 @@ pub(super) fn detect_ffi_boundary(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` uses {} — this is a cross-language boundary. Changes here affect both sides of the FFI.",
+                    "`{}` uses {} — FFI boundary, changes affect both sides.",
                     func.name, ffi
                 ),
             });
@@ -89,7 +89,7 @@ pub(super) fn detect_ffi_boundary(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}` is decorated with {} — cross-language boundary.",
+                        "`{}` decorated with {} — FFI boundary.",
                         func.name, ffi
                     ),
                 });
@@ -130,7 +130,7 @@ pub(super) fn detect_ffi_boundary(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "Module `{}` is an FFI dependency ({}) — this codebase has a cross-language boundary.",
+                        "Module `{}` is an FFI dep ({}) — cross-language boundary.",
                         m.name, ffi
                     ),
                 });
@@ -189,7 +189,7 @@ pub(super) fn detect_subprocess_calls(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}` spawns an external process via `{}` — cross-process boundary, may have different error/lifecycle semantics.",
+                        "`{}` spawns subprocess via `{}` — cross-process boundary.",
                         func.name, label
                     ),
                 });
@@ -240,7 +240,7 @@ pub(super) fn detect_ipc_boundary(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "Module `{}` indicates a {} boundary — data crosses process/network boundaries here.",
+                        "Module `{}` ({}) — process/network boundary.",
                         m.name, proto
                     ),
                 });
@@ -270,7 +270,7 @@ pub(super) fn detect_ipc_boundary(
                         },
                         node_indices: vec![idx.index()],
                         description: format!(
-                            "`{}` is a REST endpoint (`{}`) — this is a network API boundary.",
+                            "`{}` (`{}`) — REST endpoint / network API boundary.",
                             f.name, dec
                         ),
                     });

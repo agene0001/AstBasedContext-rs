@@ -375,7 +375,7 @@ fn main() {
 
             println!("Found {} results for '{query}':", filtered.len());
             for (_, node) in &filtered {
-                println!("  [{}] {}", node.label(), node.name());
+                println!("  [{}] {}", node.short_label(), node.name());
             }
         }
 
@@ -405,14 +405,14 @@ fn main() {
                     let callers = g.get_callers_of(idx);
                     println!("Callers of '{}' ({} found):", name, callers.len());
                     for (_, node) in &callers {
-                        println!("  {} [{}]", node.name(), node.label());
+                        println!("  {} [{}]", node.name(), node.short_label());
                     }
                 }
                 "callees" => {
                     let callees = g.get_callees_of(idx);
                     println!("Callees of '{}' ({} found):", name, callees.len());
                     for (_, node) in &callees {
-                        println!("  {} [{}]", node.name(), node.label());
+                        println!("  {} [{}]", node.name(), node.short_label());
                     }
                 }
                 "inheritance" => {
@@ -427,21 +427,21 @@ fn main() {
                     let chain = g.get_call_chain(idx, depth);
                     println!("Call chain from '{}' ({} nodes):", name, chain.len());
                     for (_, node, d) in &chain {
-                        println!("  {}→ {} [{}]", "  ".repeat(*d), node.name(), node.label());
+                        println!("  {}→ {} [{}]", "  ".repeat(*d), node.name(), node.short_label());
                     }
                 }
                 "implementors" => {
                     let impls = g.get_implementors(idx);
                     println!("Implementors of '{}' ({} found):", name, impls.len());
                     for (_, node) in &impls {
-                        println!("  {} [{}]", node.name(), node.label());
+                        println!("  {} [{}]", node.name(), node.short_label());
                     }
                 }
                 "children" => {
                     let children = g.get_children(idx);
                     println!("Children of '{}' ({} found):", name, children.len());
                     for (_, node) in &children {
-                        println!("  {} [{}]", node.name(), node.label());
+                        println!("  {} [{}]", node.name(), node.short_label());
                     }
                 }
                 _ => {
@@ -523,7 +523,7 @@ fn main() {
                     match node {
                         types::node::GraphNode::Function(f) => {
                             println!(
-                                "  [Function] {} ({}:{}–{}, complexity={})",
+                                "  [fn] {} ({}:{}–{}, cc={})",
                                 f.name,
                                 f.path.display(),
                                 f.span.start_line,
@@ -532,7 +532,7 @@ fn main() {
                             );
                         }
                         _ => {
-                            println!("  [{}] {}", node.label(), node.name());
+                            println!("  [{}] {}", node.short_label(), node.name());
                         }
                     }
                     if let Some(src) = node.source_snippet() {
@@ -620,112 +620,223 @@ fn main() {
                 return;
             }
 
+            // Emit compact legend
+            {
+                use redundancy::FindingKind;
+                use std::collections::BTreeSet;
+                let used: BTreeSet<&str> = filtered.iter().map(|f| match &f.kind {
+                    FindingKind::Passthrough { .. } => "P=passthrough",
+                    FindingKind::NearDuplicate { .. } => "ND=near-dup",
+                    FindingKind::StructurallySimilar { .. } => "S=similar",
+                    FindingKind::MergeCandidate { .. } => "M=merge",
+                    FindingKind::SplitCandidate { .. } => "SP=split",
+                    FindingKind::OverlappingStructs { .. } => "SO=struct-overlap",
+                    FindingKind::OverlappingEnums { .. } => "EO=enum-overlap",
+                    FindingKind::SuggestParameterStruct { .. } => "SS=suggest-struct",
+                    FindingKind::SuggestEnumDispatch { .. } => "SED=suggest-enum",
+                    FindingKind::SuggestTraitExtraction { .. } => "STE=suggest-trait",
+                    FindingKind::SuggestFacade { .. } => "FAC=facade",
+                    FindingKind::SuggestFactory { .. } => "FTY=factory",
+                    FindingKind::SuggestBuilder { .. } => "SB=builder",
+                    FindingKind::SuggestStrategy { .. } => "STR=strategy",
+                    FindingKind::SuggestTemplateMethod { .. } => "TM=template-method",
+                    FindingKind::SuggestObserver { .. } => "OBS=observer",
+                    FindingKind::SuggestDecorator { .. } => "SD=decorator",
+                    FindingKind::SuggestMediator { .. } => "MED=mediator",
+                    FindingKind::GodClass { .. } => "GC=god-class",
+                    FindingKind::CircularDependency { .. } => "CD=circular-dep",
+                    FindingKind::FeatureEnvy { .. } => "FE=feature-envy",
+                    FindingKind::ShotgunSurgery { .. } => "SG=shotgun-surgery",
+                    FindingKind::DetectedSingleton { .. } => "SNG=singleton",
+                    FindingKind::DetectedAdapter { .. } => "ADP=adapter",
+                    FindingKind::DetectedProxy { .. } => "PRX=proxy",
+                    FindingKind::DetectedCommand { .. } => "CMD=command",
+                    FindingKind::DetectedChainOfResponsibility { .. } => "COR=chain-of-resp",
+                    FindingKind::DetectedDependencyInjection { .. } => "DI=dep-injection",
+                    FindingKind::DeadCode { .. } => "DC=dead-code",
+                    FindingKind::LongParameterList { .. } => "LP=long-params",
+                    FindingKind::DataClump { .. } => "DK=data-clump",
+                    FindingKind::MiddleMan { .. } => "MM=middle-man",
+                    FindingKind::LazyClass { .. } => "LZ=lazy-class",
+                    FindingKind::RefusedBequest { .. } => "RB=refused-bequest",
+                    FindingKind::SpeculativeGenerality { .. } => "SPG=speculative-generality",
+                    FindingKind::InappropriateIntimacy { .. } => "II=inappropriate-intimacy",
+                    FindingKind::DeepNesting { .. } => "DN=deep-nesting",
+                    FindingKind::DetectedVisitor { .. } => "VIS=visitor",
+                    FindingKind::DetectedIterator { .. } => "ITR=iterator",
+                    FindingKind::DetectedState { .. } => "STA=state",
+                    FindingKind::DetectedComposite { .. } => "CMP=composite",
+                    FindingKind::DetectedRepository { .. } => "R=repository",
+                    FindingKind::DetectedPrototype { .. } => "PRT=prototype",
+                    FindingKind::HubModule { .. } => "HM=hub-module",
+                    FindingKind::OrphanModule { .. } => "OM=orphan-module",
+                    FindingKind::DivergentChange { .. } => "DV=divergent-change",
+                    FindingKind::ParallelInheritance { .. } => "PI=parallel-inherit",
+                    FindingKind::PrimitiveObsession { .. } => "PO=primitive-obsession",
+                    FindingKind::LargeClass { .. } => "LCL=large-class",
+                    FindingKind::UnstableDependency { .. } => "UD=unstable-dep",
+                    FindingKind::DetectedFlyweight { .. } => "FLY=flyweight",
+                    FindingKind::DetectedEventEmitter { .. } => "EE=event-emitter",
+                    FindingKind::DetectedMemento { .. } => "MEM=memento",
+                    FindingKind::DetectedFluentBuilder { .. } => "FB=fluent-builder",
+                    FindingKind::DetectedNullObject { .. } => "NO=null-object",
+                    FindingKind::InconsistentNaming { .. } => "IN=inconsistent-naming",
+                    FindingKind::CircularPackageDependency { .. } => "CPD=circular-pkg-dep",
+                    FindingKind::SuggestSumType { .. } => "SST=sum-type",
+                    FindingKind::SuggestEnumFromHierarchy { .. } => "HTE=hierarchy-to-enum",
+                    FindingKind::BooleanBlindness { .. } => "BB=bool-blindness",
+                    FindingKind::SuggestNewtype { .. } => "SN=newtype",
+                    FindingKind::SuggestSealedType { .. } => "SEL=sealed-type",
+                    FindingKind::LargeProductType { .. } => "LPT=large-product-type",
+                    FindingKind::AnemicDomainModel { .. } => "AM=anemic-model",
+                    FindingKind::MagicNumber { .. } => "MN=magic-number",
+                    FindingKind::MutableGlobalState { .. } => "MG=mutable-global",
+                    FindingKind::EmptyCatch { .. } => "EC=empty-catch",
+                    FindingKind::CallbackHell { .. } => "CH=callback-hell",
+                    FindingKind::ApiInconsistency { .. } => "AI=api-inconsistency",
+                    FindingKind::LackOfCohesion { .. } => "LC=low-cohesion",
+                    FindingKind::HighCoupling { .. } => "HC=high-coupling",
+                    FindingKind::ModuleInstability { .. } => "UM=unstable-module",
+                    FindingKind::HighCognitiveComplexity { .. } => "CC=cognitive-complexity",
+                    FindingKind::HighRiskFunction { .. } => "HRF=high-risk-fn",
+                    FindingKind::HighRiskFile { .. } => "HRL=high-risk-file",
+                    FindingKind::UntestedPublicFunction { .. } => "UP=untested-public",
+                    FindingKind::LowTestRatio { .. } => "LTR=low-test-ratio",
+                    FindingKind::IntegrationTestSmell { .. } => "IS=integration-smell",
+                    FindingKind::HighBlastRadius { .. } => "HBR=high-blast-radius",
+                    FindingKind::MisplacedFunction { .. } => "MF=misplaced-fn",
+                    FindingKind::ImplicitModule { .. } => "IM=implicit-module",
+                    FindingKind::UnstablePublicApi { .. } => "UPA=unstable-api",
+                    FindingKind::UndocumentedPublicApi { .. } => "UA=undocumented-api",
+                    FindingKind::LeakyAbstraction { .. } => "LA=leaky-abstraction",
+                    FindingKind::FfiBoundary { .. } => "FFI=ffi-boundary",
+                    FindingKind::SubprocessCall { .. } => "SUB=subprocess",
+                    FindingKind::IpcBoundary { .. } => "IPC=ipc-boundary",
+                    FindingKind::EnvVarUsage { .. } => "EV=env-var",
+                    FindingKind::HardcodedEndpoint { .. } => "HE=hardcoded-endpoint",
+                    FindingKind::FeatureFlag { .. } => "FF=feature-flag",
+                    FindingKind::ConfigFileUsage { .. } => "CF=config-file",
+                    FindingKind::VecUsedAsSet { .. } => "VAS=vec-as-set",
+                    FindingKind::VecUsedAsMap { .. } => "VAM=vec-as-map",
+                    FindingKind::LinearSearchInLoop { .. } => "LSIL=linear-search-in-loop",
+                    FindingKind::StringConcatInLoop { .. } => "SCIL=string-concat-in-loop",
+                    FindingKind::SortedVecForLookup { .. } => "SVL=sorted-vec-lookup",
+                    FindingKind::NestedLoopLookup { .. } => "NLL=nested-loop-lookup",
+                    FindingKind::HashMapWithSequentialKeys { .. } => "HSK=hashmap-seq-keys",
+                    FindingKind::ExcessiveCollectIterate { .. } => "CI=collect-iterate",
+                    FindingKind::UnusedImport { .. } => "UI=unused-import",
+                    FindingKind::InconsistentErrorHandling { .. } => "IEH=inconsistent-error",
+                    FindingKind::TechDebtComment { .. } => "TD=tech-debt",
+                }).collect();
+                println!("Tiers: C=critical H=high M=medium L=low");
+                println!("Codes: {}\n", used.into_iter().collect::<Vec<_>>().join(" "));
+            }
+
             for finding in &filtered {
-                // Print kind tag
                 use redundancy::FindingKind;
                 let tag = match &finding.kind {
-                    FindingKind::Passthrough { .. } => "PASSTHROUGH",
-                    FindingKind::NearDuplicate { .. } => "NEAR-DUPLICATE",
-                    FindingKind::StructurallySimilar { .. } => "SIMILAR",
-                    FindingKind::MergeCandidate { .. } => "MERGE",
-                    FindingKind::SplitCandidate { .. } => "SPLIT",
-                    FindingKind::OverlappingStructs { .. } => "STRUCT-OVERLAP",
-                    FindingKind::OverlappingEnums { .. } => "ENUM-OVERLAP",
-                    FindingKind::SuggestParameterStruct { .. } => "SUGGEST-STRUCT",
-                    FindingKind::SuggestEnumDispatch { .. } => "SUGGEST-ENUM",
-                    FindingKind::SuggestTraitExtraction { .. } => "SUGGEST-TRAIT",
-                    FindingKind::SuggestFacade { .. } => "SUGGEST-FACADE",
-                    FindingKind::SuggestFactory { .. } => "SUGGEST-FACTORY",
-                    FindingKind::SuggestBuilder { .. } => "SUGGEST-BUILDER",
-                    FindingKind::SuggestStrategy { .. } => "SUGGEST-STRATEGY",
-                    FindingKind::SuggestTemplateMethod { .. } => "SUGGEST-TEMPLATE",
-                    FindingKind::SuggestObserver { .. } => "SUGGEST-OBSERVER",
-                    FindingKind::SuggestDecorator { .. } => "SUGGEST-DECORATOR",
-                    FindingKind::SuggestMediator { .. } => "SUGGEST-MEDIATOR",
-                    FindingKind::GodClass { .. } => "GOD-CLASS",
-                    FindingKind::CircularDependency { .. } => "CIRCULAR-DEP",
-                    FindingKind::FeatureEnvy { .. } => "FEATURE-ENVY",
-                    FindingKind::ShotgunSurgery { .. } => "SHOTGUN-SURGERY",
-                    FindingKind::DetectedSingleton { .. } => "SINGLETON",
-                    FindingKind::DetectedAdapter { .. } => "ADAPTER",
-                    FindingKind::DetectedProxy { .. } => "PROXY",
-                    FindingKind::DetectedCommand { .. } => "COMMAND",
-                    FindingKind::DetectedChainOfResponsibility { .. } => "CHAIN-OF-RESP",
+                    FindingKind::Passthrough { .. } => "P",
+                    FindingKind::NearDuplicate { .. } => "ND",
+                    FindingKind::StructurallySimilar { .. } => "S",
+                    FindingKind::MergeCandidate { .. } => "M",
+                    FindingKind::SplitCandidate { .. } => "SP",
+                    FindingKind::OverlappingStructs { .. } => "SO",
+                    FindingKind::OverlappingEnums { .. } => "EO",
+                    FindingKind::SuggestParameterStruct { .. } => "SS",
+                    FindingKind::SuggestEnumDispatch { .. } => "SED",
+                    FindingKind::SuggestTraitExtraction { .. } => "STE",
+                    FindingKind::SuggestFacade { .. } => "FAC",
+                    FindingKind::SuggestFactory { .. } => "FTY",
+                    FindingKind::SuggestBuilder { .. } => "SB",
+                    FindingKind::SuggestStrategy { .. } => "STR",
+                    FindingKind::SuggestTemplateMethod { .. } => "TM",
+                    FindingKind::SuggestObserver { .. } => "OBS",
+                    FindingKind::SuggestDecorator { .. } => "SD",
+                    FindingKind::SuggestMediator { .. } => "MED",
+                    FindingKind::GodClass { .. } => "GC",
+                    FindingKind::CircularDependency { .. } => "CD",
+                    FindingKind::FeatureEnvy { .. } => "FE",
+                    FindingKind::ShotgunSurgery { .. } => "SG",
+                    FindingKind::DetectedSingleton { .. } => "SNG",
+                    FindingKind::DetectedAdapter { .. } => "ADP",
+                    FindingKind::DetectedProxy { .. } => "PRX",
+                    FindingKind::DetectedCommand { .. } => "CMD",
+                    FindingKind::DetectedChainOfResponsibility { .. } => "COR",
                     FindingKind::DetectedDependencyInjection { .. } => "DI",
-                    FindingKind::DeadCode { .. } => "DEAD-CODE",
-                    FindingKind::LongParameterList { .. } => "LONG-PARAMS",
-                    FindingKind::DataClump { .. } => "DATA-CLUMP",
-                    FindingKind::MiddleMan { .. } => "MIDDLE-MAN",
-                    FindingKind::LazyClass { .. } => "LAZY-CLASS",
-                    FindingKind::RefusedBequest { .. } => "REFUSED-BEQUEST",
-                    FindingKind::SpeculativeGenerality { .. } => "SPECULATIVE-GENERALITY",
-                    FindingKind::InappropriateIntimacy { .. } => "INAPPROPRIATE-INTIMACY",
-                    FindingKind::DeepNesting { .. } => "DEEP-NESTING",
-                    FindingKind::DetectedVisitor { .. } => "VISITOR",
-                    FindingKind::DetectedIterator { .. } => "ITERATOR",
-                    FindingKind::DetectedState { .. } => "STATE",
-                    FindingKind::DetectedComposite { .. } => "COMPOSITE",
-                    FindingKind::DetectedRepository { .. } => "REPOSITORY",
-                    FindingKind::DetectedPrototype { .. } => "PROTOTYPE",
-                    FindingKind::HubModule { .. } => "HUB-MODULE",
-                    FindingKind::OrphanModule { .. } => "ORPHAN-MODULE",
-                    FindingKind::DivergentChange { .. } => "DIVERGENT-CHANGE",
-                    FindingKind::ParallelInheritance { .. } => "PARALLEL-INHERITANCE",
-                    FindingKind::PrimitiveObsession { .. } => "PRIMITIVE-OBSESSION",
-                    FindingKind::LargeClass { .. } => "LARGE-CLASS",
-                    FindingKind::UnstableDependency { .. } => "UNSTABLE-DEP",
-                    FindingKind::DetectedFlyweight { .. } => "FLYWEIGHT",
-                    FindingKind::DetectedEventEmitter { .. } => "EVENT-EMITTER",
-                    FindingKind::DetectedMemento { .. } => "MEMENTO",
-                    FindingKind::DetectedFluentBuilder { .. } => "FLUENT-BUILDER",
-                    FindingKind::DetectedNullObject { .. } => "NULL-OBJECT",
-                    FindingKind::InconsistentNaming { .. } => "INCONSISTENT-NAMING",
-                    FindingKind::CircularPackageDependency { .. } => "CIRCULAR-PKG-DEP",
-                    FindingKind::SuggestSumType { .. } => "SUGGEST-SUM-TYPE",
-                    FindingKind::SuggestEnumFromHierarchy { .. } => "HIERARCHY-TO-ENUM",
-                    FindingKind::BooleanBlindness { .. } => "BOOLEAN-BLINDNESS",
-                    FindingKind::SuggestNewtype { .. } => "SUGGEST-NEWTYPE",
-                    FindingKind::SuggestSealedType { .. } => "SUGGEST-SEALED",
-                    FindingKind::LargeProductType { .. } => "LARGE-PRODUCT-TYPE",
-                    FindingKind::AnemicDomainModel { .. } => "ANEMIC-MODEL",
-                    FindingKind::MagicNumber { .. } => "MAGIC-NUMBER",
-                    FindingKind::MutableGlobalState { .. } => "MUTABLE-GLOBAL",
-                    FindingKind::EmptyCatch { .. } => "EMPTY-CATCH",
-                    FindingKind::CallbackHell { .. } => "CALLBACK-HELL",
-                    FindingKind::ApiInconsistency { .. } => "API-INCONSISTENCY",
-                    FindingKind::LackOfCohesion { .. } => "LOW-COHESION",
-                    FindingKind::HighCoupling { .. } => "HIGH-COUPLING",
-                    FindingKind::ModuleInstability { .. } => "UNSTABLE-MODULE",
-                    FindingKind::HighCognitiveComplexity { .. } => "COGNITIVE-COMPLEXITY",
-                    FindingKind::HighRiskFunction { .. } => "HIGH-RISK-FUNC",
-                    FindingKind::HighRiskFile { .. } => "HIGH-RISK-FILE",
-                    FindingKind::UntestedPublicFunction { .. } => "UNTESTED-PUBLIC",
-                    FindingKind::LowTestRatio { .. } => "LOW-TEST-RATIO",
-                    FindingKind::IntegrationTestSmell { .. } => "INTEGRATION-SMELL",
-                    FindingKind::HighBlastRadius { .. } => "HIGH-BLAST-RADIUS",
-                    FindingKind::MisplacedFunction { .. } => "MISPLACED-FUNC",
-                    FindingKind::ImplicitModule { .. } => "IMPLICIT-MODULE",
-                    FindingKind::UnstablePublicApi { .. } => "UNSTABLE-API",
-                    FindingKind::UndocumentedPublicApi { .. } => "UNDOCUMENTED-API",
-                    FindingKind::LeakyAbstraction { .. } => "LEAKY-ABSTRACTION",
-                    FindingKind::FfiBoundary { .. } => "FFI-BOUNDARY",
-                    FindingKind::SubprocessCall { .. } => "SUBPROCESS",
-                    FindingKind::IpcBoundary { .. } => "IPC-BOUNDARY",
-                    FindingKind::EnvVarUsage { .. } => "ENV-VAR",
-                    FindingKind::HardcodedEndpoint { .. } => "HARDCODED-ENDPOINT",
-                    FindingKind::FeatureFlag { .. } => "FEATURE-FLAG",
-                    FindingKind::ConfigFileUsage { .. } => "CONFIG-FILE",
-                    FindingKind::VecUsedAsSet { .. } => "VEC-AS-SET",
-                    FindingKind::VecUsedAsMap { .. } => "VEC-AS-MAP",
-                    FindingKind::LinearSearchInLoop { .. } => "LINEAR-SEARCH-IN-LOOP",
-                    FindingKind::StringConcatInLoop { .. } => "STRING-CONCAT-IN-LOOP",
-                    FindingKind::SortedVecForLookup { .. } => "SORTED-VEC-LOOKUP",
-                    FindingKind::NestedLoopLookup { .. } => "NESTED-LOOP-LOOKUP",
-                    FindingKind::HashMapWithSequentialKeys { .. } => "HASHMAP-SEQ-KEYS",
-                    FindingKind::ExcessiveCollectIterate { .. } => "EXCESSIVE-COLLECT",
-                    FindingKind::UnusedImport { .. } => "UNUSED-IMPORT",
-                    FindingKind::InconsistentErrorHandling { .. } => "INCONSISTENT-ERROR-HANDLING",
-                    FindingKind::TechDebtComment { .. } => "TECH-DEBT",
+                    FindingKind::DeadCode { .. } => "DC",
+                    FindingKind::LongParameterList { .. } => "LP",
+                    FindingKind::DataClump { .. } => "DK",
+                    FindingKind::MiddleMan { .. } => "MM",
+                    FindingKind::LazyClass { .. } => "LZ",
+                    FindingKind::RefusedBequest { .. } => "RB",
+                    FindingKind::SpeculativeGenerality { .. } => "SPG",
+                    FindingKind::InappropriateIntimacy { .. } => "II",
+                    FindingKind::DeepNesting { .. } => "DN",
+                    FindingKind::DetectedVisitor { .. } => "VIS",
+                    FindingKind::DetectedIterator { .. } => "ITR",
+                    FindingKind::DetectedState { .. } => "STA",
+                    FindingKind::DetectedComposite { .. } => "CMP",
+                    FindingKind::DetectedRepository { .. } => "R",
+                    FindingKind::DetectedPrototype { .. } => "PRT",
+                    FindingKind::HubModule { .. } => "HM",
+                    FindingKind::OrphanModule { .. } => "OM",
+                    FindingKind::DivergentChange { .. } => "DV",
+                    FindingKind::ParallelInheritance { .. } => "PI",
+                    FindingKind::PrimitiveObsession { .. } => "PO",
+                    FindingKind::LargeClass { .. } => "LCL",
+                    FindingKind::UnstableDependency { .. } => "UD",
+                    FindingKind::DetectedFlyweight { .. } => "FLY",
+                    FindingKind::DetectedEventEmitter { .. } => "EE",
+                    FindingKind::DetectedMemento { .. } => "MEM",
+                    FindingKind::DetectedFluentBuilder { .. } => "FB",
+                    FindingKind::DetectedNullObject { .. } => "NO",
+                    FindingKind::InconsistentNaming { .. } => "IN",
+                    FindingKind::CircularPackageDependency { .. } => "CPD",
+                    FindingKind::SuggestSumType { .. } => "SST",
+                    FindingKind::SuggestEnumFromHierarchy { .. } => "HTE",
+                    FindingKind::BooleanBlindness { .. } => "BB",
+                    FindingKind::SuggestNewtype { .. } => "SN",
+                    FindingKind::SuggestSealedType { .. } => "SEL",
+                    FindingKind::LargeProductType { .. } => "LPT",
+                    FindingKind::AnemicDomainModel { .. } => "AM",
+                    FindingKind::MagicNumber { .. } => "MN",
+                    FindingKind::MutableGlobalState { .. } => "MG",
+                    FindingKind::EmptyCatch { .. } => "EC",
+                    FindingKind::CallbackHell { .. } => "CH",
+                    FindingKind::ApiInconsistency { .. } => "AI",
+                    FindingKind::LackOfCohesion { .. } => "LC",
+                    FindingKind::HighCoupling { .. } => "HC",
+                    FindingKind::ModuleInstability { .. } => "UM",
+                    FindingKind::HighCognitiveComplexity { .. } => "CC",
+                    FindingKind::HighRiskFunction { .. } => "HRF",
+                    FindingKind::HighRiskFile { .. } => "HRL",
+                    FindingKind::UntestedPublicFunction { .. } => "UP",
+                    FindingKind::LowTestRatio { .. } => "LTR",
+                    FindingKind::IntegrationTestSmell { .. } => "IS",
+                    FindingKind::HighBlastRadius { .. } => "HBR",
+                    FindingKind::MisplacedFunction { .. } => "MF",
+                    FindingKind::ImplicitModule { .. } => "IM",
+                    FindingKind::UnstablePublicApi { .. } => "UPA",
+                    FindingKind::UndocumentedPublicApi { .. } => "UA",
+                    FindingKind::LeakyAbstraction { .. } => "LA",
+                    FindingKind::FfiBoundary { .. } => "FFI",
+                    FindingKind::SubprocessCall { .. } => "SUB",
+                    FindingKind::IpcBoundary { .. } => "IPC",
+                    FindingKind::EnvVarUsage { .. } => "EV",
+                    FindingKind::HardcodedEndpoint { .. } => "HE",
+                    FindingKind::FeatureFlag { .. } => "FF",
+                    FindingKind::ConfigFileUsage { .. } => "CF",
+                    FindingKind::VecUsedAsSet { .. } => "VAS",
+                    FindingKind::VecUsedAsMap { .. } => "VAM",
+                    FindingKind::LinearSearchInLoop { .. } => "LSIL",
+                    FindingKind::StringConcatInLoop { .. } => "SCIL",
+                    FindingKind::SortedVecForLookup { .. } => "SVL",
+                    FindingKind::NestedLoopLookup { .. } => "NLL",
+                    FindingKind::HashMapWithSequentialKeys { .. } => "HSK",
+                    FindingKind::ExcessiveCollectIterate { .. } => "CI",
+                    FindingKind::UnusedImport { .. } => "UI",
+                    FindingKind::InconsistentErrorHandling { .. } => "IEH",
+                    FindingKind::TechDebtComment { .. } => "TD",
                 };
 
                 let tier_flag = match finding.tier {
@@ -734,9 +845,8 @@ fn main() {
                     redundancy::Tier::Medium => "M",
                     redundancy::Tier::Low => "L",
                 };
-                let initials: String = tag.split('-').filter_map(|s| s.chars().next()).collect();
 
-                println!("[{tier_flag}][{initials}] {}", finding.description);
+                println!("[{tier_flag}][{tag}] {}", finding.description);
 
                 for &ni in &finding.node_indices {
                     let node_idx = petgraph::graph::NodeIndex::new(ni);
@@ -758,7 +868,7 @@ fn main() {
                         } else {
                             format!(" ({})", path_str)
                         };
-                        println!("    {} [{}]{loc_str}", node.name(), node.label());
+                        println!("    {} [{}]{loc_str}", node.name(), node.short_label());
 
                         if include_source {
                             if let Some(src) = node.source_snippet() {

@@ -1,5 +1,6 @@
 use crate::types::EdgeKind;
 use crate::types::node::GraphNode;
+use petgraph::visit::EdgeRef;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -32,7 +33,7 @@ pub(super) fn detect_hub_module(
                 },
                 node_indices: vec![file_idx.index()],
                 description: format!(
-                    "`{}` imports from {} other modules — it may be a bottleneck. Consider splitting responsibilities.",
+                    "`{}` imports {} modules — bottleneck, split responsibilities.",
                     file_node.name(), import_count
                 ),
             });
@@ -66,9 +67,10 @@ pub(super) fn detect_orphan_module(
             continue;
         }
 
-        // Check if any other file calls ctx.functions in this file or imports from it
+        // Check if any other file imports from this file (only count IMPORTS edges, not CONTAINS)
         let incoming = ctx.graph.graph
             .edges_directed(file_idx, petgraph::Direction::Incoming)
+            .filter(|e| matches!(e.weight(), EdgeKind::Imports { .. } | EdgeKind::Calls { .. }))
             .count();
 
         // Also check if any function inside this file is called from outside
@@ -93,7 +95,7 @@ pub(super) fn detect_orphan_module(
                     },
                     node_indices: vec![file_idx.index()],
                     description: format!(
-                        "`{}` has no incoming calls or imports — it may be unused or only used as an entry point.",
+                        "`{}`: no incoming calls or imports — unused or entry point only.",
                         file_name
                     ),
                 });
@@ -150,7 +152,7 @@ pub(super) fn detect_inconsistent_naming(
                 },
                 node_indices: vec![file_idx.index()],
                 description: format!(
-                    "`{}` mixes snake_case ({} ctx.functions) and camelCase ({} ctx.functions) — consider standardizing.",
+                    "`{}`: {} snake_case + {} camelCase functions — standardize naming.",
                     file_node.name(), snake.len(), camel.len()
                 ),
             });

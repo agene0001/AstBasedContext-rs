@@ -87,7 +87,7 @@ pub(super) fn detect_unused_imports(
                     },
                     node_indices: vec![file_idx.index()],
                     description: format!(
-                        "Import `{}` in {} appears unused — consider removing it.",
+                        "Import `{}` in {} unused — remove it.",
                         module,
                         file_data.path.display(),
                     ),
@@ -154,7 +154,7 @@ pub(super) fn detect_inconsistent_error_handling(
                 },
                 node_indices: vec![file_idx.index()],
                 description: format!(
-                    "{} mixes {} error handling patterns ({}). Consider standardizing.",
+                    "{}: {} mixed error patterns ({}) — standardize.",
                     file_data.path.display(),
                     patterns_found.len(),
                     patterns_found.join(", "),

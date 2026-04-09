@@ -64,7 +64,7 @@ pub(super) fn detect_untested_public_functions(
             },
             node_indices: vec![idx.index()],
             description: format!(
-                "Public function `{}` in `{}` has no test coverage ({} callers). Changes to untested public APIs are risky.",
+                "Public `{}` in `{}` has no tests ({} callers) — untested public API.",
                 func.name,
                 func.path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default(),
                 caller_count
@@ -120,7 +120,7 @@ pub(super) fn detect_low_test_ratio(
                 },
                 node_indices: vec![file_idx.index()],
                 description: format!(
-                    "`{}` has {}/{} ctx.functions tested ({:.0}%) — below {:.0}% threshold.",
+                    "`{}`: {}/{} tested ({:.0}%) — below {:.0}% threshold.",
                     fd.name, tested_count, function_count, ratio * 100.0, ctx.config.test_ratio_threshold * 100.0
                 ),
             });
@@ -171,7 +171,7 @@ pub(super) fn detect_integration_test_smells(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "Test `{}` touches {} files — may be an integration test disguised as a unit test.",
+                    "Test `{}` touches {} files — likely integration test disguised as unit test.",
                     func.name, distinct_files.len()
                 ),
             });

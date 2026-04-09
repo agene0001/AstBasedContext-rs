@@ -47,7 +47,7 @@ pub(super) fn detect_env_var_usage(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}` reads environment variables via `{}` — behavior depends on deployment configuration.",
+                        "`{}` reads env vars via `{}` — deployment-dependent behavior.",
                         func.name, label
                     ),
                 });
@@ -134,7 +134,7 @@ pub(super) fn detect_hardcoded_endpoints(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` contains hardcoded endpoint `{}` — should be a configuration value.",
+                    "`{}` hardcodes endpoint `{}` — move to config.",
                     func.name, endpoint
                 ),
             });
@@ -189,7 +189,7 @@ pub(super) fn detect_feature_flags(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}` uses {} — behavior varies by feature/platform configuration.",
+                        "`{}` uses {} — feature/platform-conditional behavior.",
                         func.name, label
                     ),
                 });
@@ -263,7 +263,7 @@ pub(super) fn detect_config_file_usage(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}` references {} — this function depends on external configuration.",
+                        "`{}` references {} — depends on external config.",
                         func.name, label
                     ),
                 });

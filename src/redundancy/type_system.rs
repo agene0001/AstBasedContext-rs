@@ -77,7 +77,7 @@ pub(super) fn detect_tagged_union(
                         },
                         node_indices: vec![idx.index()],
                         description: format!(
-                            "`{}` uses a `{}` tag field with conditional branching — consider replacing with an enum/sum type where each variant carries its own data.",
+                            "`{}::{}` tag with conditional branching — replace with enum/sum type.",
                             name, tf.name
                         ),
                     });
@@ -151,7 +151,7 @@ pub(super) fn detect_hierarchy_to_enum(
                 },
                 node_indices: vec![base_idx.index()],
                 description: format!(
-                    "`{}` has {} leaf subclasses with no data [{}] — consider modeling as an enum/ADT with variants.",
+                    "`{}`: {} data-free leaf subclasses [{}] — model as enum/ADT.",
                     base_name, leaf_names.len(), leaf_names.join(", ")
                 ),
             });
@@ -203,7 +203,7 @@ pub(super) fn detect_boolean_blindness(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` takes {} boolean parameters [{}] — consider using descriptive enums for clarity.",
+                    "`{}`: {} bool params [{}] — use descriptive enums.",
                     func.name, bool_params.len(), bool_params.join(", ")
                 ),
             });
@@ -265,7 +265,7 @@ pub(super) fn detect_suggest_newtype(
                         },
                         node_indices: vec![idx.index()],
                         description: format!(
-                            "`{}` wraps a single `{}` field — consider adding methods to leverage newtype safety, or ensure callers don't use the raw primitive.",
+                            "`{}` wraps `{}` with no methods — add methods for newtype safety.",
                             name, type_ann
                         ),
                     });
@@ -289,7 +289,7 @@ pub(super) fn detect_suggest_sealed_type(
         .node_indices()
         .filter_map(|idx| {
             let node = &ctx.graph.graph[idx];
-            if matches!(node, GraphNode::Trait(_) | GraphNode::Interface(_)) {
+            if matches!(node, GraphNode::Trait(_) | GraphNode::Interface(_) | GraphNode::Class(_)) {
                 Some((idx, node))
             } else {
                 None
@@ -307,6 +307,7 @@ pub(super) fn detect_suggest_sealed_type(
         let abs_path = match abs_node {
             GraphNode::Trait(d) => &d.path,
             GraphNode::Interface(d) => &d.path,
+            GraphNode::Class(d) => &d.path,
             _ => continue,
         };
 
@@ -337,7 +338,7 @@ pub(super) fn detect_suggest_sealed_type(
                 },
                 node_indices: vec![abs_idx.index()],
                 description: format!(
-                    "`{}` and all its implementors [{}] are in `{}` — this is effectively a closed sum type. Consider sealing it or using an enum.",
+                    "`{}` + implementors [{}] all in `{}` — closed sum type, seal or use enum.",
                     abs_node.name(), imp_names.join(", "), file_name
                 ),
             });
@@ -389,7 +390,7 @@ pub(super) fn detect_large_product_type(
             },
             node_indices: vec![idx.index()],
             description: format!(
-                "`{}` has {} fields ({} optional) — consider decomposing into smaller, focused structs or using a builder.",
+                "`{}`: {} fields ({} optional) — decompose into smaller structs or use a builder.",
                 name, fields.len(), optional_count
             ),
         });

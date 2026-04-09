@@ -45,7 +45,7 @@ pub(super) fn detect_high_blast_radius(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "Changing `{}` affects {} modules ({} direct callers, {} transitive). Consider stabilizing its interface.",
+                    "`{}`: {} modules affected ({} direct, {} transitive callers) — stabilize interface.",
                     func.name, modules.len(), direct_caller_count, transitive.len()
                 ),
             });
@@ -118,8 +118,8 @@ pub(super) fn detect_misplaced_functions(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}` interacts more with `{}` ({} connections) than its own file ({} connections) — it may belong there.",
-                        func.name, short_name, count, own_count
+                        "`{}`: {} connections to `{}` vs {} in own file — may belong there.",
+                        func.name, count, short_name, own_count
                     ),
                 });
             }
@@ -180,7 +180,7 @@ pub(super) fn detect_implicit_modules(
                 },
                 node_indices: vec![],
                 description: format!(
-                    "{} ctx.functions tightly coupled across `{}` and `{}`: {}. These may form an implicit module that should be colocated.",
+                    "{} functions tightly coupled across `{}` and `{}`: {} — implicit module, consider colocating.",
                     func_names.len(), file_a, file_b,
                     display_names.join(", ")
                 ),

@@ -77,8 +77,7 @@ pub(super) fn suggest_facade(
                 },
                 node_indices: internal_functions_called.iter().map(|i| i.index()).collect(),
                 description: format!(
-                    "Module `{}` has {} internal ctx.functions called directly by {} external callers. \
-                     Consider adding a facade to simplify the public API.",
+                    "`{}`: {} internal functions called by {} external callers — add a facade.",
                     module_name, internal_called, external_count,
                 ),
             });
@@ -121,6 +120,18 @@ pub(super) fn suggest_factory(
         let mut call_sites: HashSet<String> = HashSet::new(); // unique caller file paths
 
         for &(child_idx, _) in children {
+            // Check callers of the class node itself (e.g. Python `MyClass()` constructor calls)
+            for (caller_idx, caller_node) in ctx.get_callers_of(child_idx) {
+                if let GraphNode::Function(cf) = caller_node {
+                    let caller_parent = ctx.parent_of(caller_idx);
+                    if let Some(cp) = caller_parent {
+                        if !child_indices.contains(&cp) {
+                            call_sites.insert(cf.path.to_string_lossy().to_string());
+                        }
+                    }
+                }
+            }
+
             // Look for callers of the child's constructor methods
             let child_methods = ctx.get_children(child_idx);
             for (method_idx, method_node) in child_methods {
@@ -163,8 +174,7 @@ pub(super) fn suggest_factory(
                 },
                 node_indices: children.iter().map(|(idx, _)| idx.index()).collect(),
                 description: format!(
-                    "Classes {} all inherit from `{}` and their constructors are called from {} \
-                     different locations. Consider a factory method on `{}` to centralize creation.",
+                    "{} inherit `{}`, constructed in {} locations — add factory method on `{}` to centralize.",
                     sibling_names.join(", "), base_name, call_sites.len(), base_name,
                 ),
             });
@@ -216,8 +226,7 @@ pub(super) fn suggest_builder(
             },
             node_indices: vec![idx.index()],
             description: format!(
-                "{} `{}` takes {} parameters. Consider a builder pattern to improve \
-                 readability and allow optional parameters with defaults.",
+                "{} `{}`: {} params — use builder pattern for optional defaults.",
                 context, func.name, param_count,
             ),
         });
@@ -232,11 +241,12 @@ pub(super) fn suggest_strategy(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
-    // Find traits/interfaces with 3+ implementors
+    // Find traits/interfaces/abstract classes with 3+ implementors
     for idx in ctx.graph.graph.node_indices() {
         let trait_name = match &ctx.graph.graph[idx] {
             GraphNode::Trait(t) => t.name.clone(),
             GraphNode::Interface(i) => i.name.clone(),
+            GraphNode::Class(c) => c.name.clone(),
             _ => continue,
         };
 
@@ -302,13 +312,12 @@ pub(super) fn suggest_strategy(
                     .chain(implementors.iter().map(|(i, _)| i.index()))
                     .collect(),
                 description: format!(
-                    "Trait/interface `{}` has {} implementors ({}){}. \
-                     If callers select implementors at runtime, consider formalizing with the strategy pattern.",
+                    "`{}`: {} implementors ({}){}. Runtime selection → Strategy pattern.",
                     trait_name,
                     implementors.len(),
                     impl_names.join(", "),
                     if branching_callers > 0 {
-                        format!(" and {} callers branch across them", branching_callers)
+                        format!(", {} callers branch across them", branching_callers)
                     } else {
                         String::new()
                     },
@@ -397,9 +406,7 @@ pub(super) fn suggest_template_method(
                     .chain(subclasses.iter().map(|(i, _)| i.index()))
                     .collect(),
                 description: format!(
-                    "Class `{}` has {} subclasses that all override methods {}. \
-                     This suggests a template method pattern where the base defines the \
-                     algorithm skeleton and subclasses fill in the hooks.",
+                    "`{}`: {} subclasses all override [{}] — Template Method pattern.",
                     base_name,
                     subclasses.len(),
                     hook_methods.join(", "),
@@ -466,9 +473,7 @@ pub(super) fn suggest_observer(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` is called by {} callers from {} different modules. \
-                     If these callers react to the same event, consider an observer/event \
-                     pattern to decouple them.",
+                    "`{}`: {} callers from {} modules — if reacting to same event, use Observer pattern.",
                     func.name, callers.len(), external_modules,
                 ),
             });
@@ -536,8 +541,7 @@ pub(super) fn suggest_decorator(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}` wraps a call to `{}` with before/after logic ({} lines). \
-                         If this pattern repeats, consider a decorator or middleware approach.",
+                        "`{}` wraps `{}` with before/after logic ({}L) — repeating? use Decorator/middleware.",
                         func.name, callee_name, line_count,
                     ),
                 });
@@ -626,9 +630,7 @@ pub(super) fn suggest_mediator(
                 },
                 node_indices: func_indices.iter().map(|i| i.index()).collect(),
                 description: format!(
-                    "Module `{}` is called by {} modules and calls into {} modules, \
-                     acting as a coordination hub. If this coupling is problematic, \
-                     consider a mediator pattern to centralize the interaction logic.",
+                    "`{}`: fan-in={}, fan-out={} — coordination hub, consider Mediator pattern.",
                     module_name, fan_in, fan_out,
                 ),
             });

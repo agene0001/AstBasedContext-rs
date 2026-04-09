@@ -745,7 +745,8 @@ fn extract_python_params_typed(params_node: Option<&Node>, source: &[u8]) -> (Ve
     (args, arg_types)
 }
 
-/// Extract class fields from `self.x = ...` and `self.x: Type = ...` patterns in the class body.
+/// Extract class fields from `self.x = ...`, `self.x: Type = ...`, and class-level
+/// assignments like `name: str` or `count = 0` in the class body.
 fn extract_python_class_fields(body_node: Option<&Node>, source: &[u8]) -> Vec<FieldDecl> {
     let Some(body) = body_node else {
         return Vec::new();
@@ -753,10 +754,67 @@ fn extract_python_class_fields(body_node: Option<&Node>, source: &[u8]) -> Vec<F
     let mut fields = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    // Walk all descendants looking for attribute assignments like self.x = ... or self.x: Type
+    // Pass 1: Extract class-level (static) fields from direct children of the body block.
+    // These are assignments like `count = 0` or annotated like `name: str = ""`.
+    let mut cursor = body.walk();
+    if cursor.goto_first_child() {
+        loop {
+            let child = cursor.node();
+
+            // Class-level annotated assignment: `name: str = value` or `name: str`
+            // tree-sitter-python parses these as `expression_statement` containing
+            // an `assignment` with a `type` field, or a bare `type` node.
+            if child.kind() == "expression_statement" {
+                // The expression_statement's child may be an assignment or a type annotation
+                if let Some(expr) = child.child(0) {
+                    if expr.kind() == "assignment" {
+                        if let Some(left) = expr.child_by_field_name("left") {
+                            if left.kind() == "identifier" {
+                                let name = get_node_text(&left, source).to_string();
+                                if seen.insert(name.clone()) {
+                                    let type_ann = expr.child_by_field_name("type")
+                                        .map(|t| get_node_text(&t, source).to_string());
+                                    let visibility = python_field_visibility(&name);
+                                    fields.push(FieldDecl {
+                                        name,
+                                        type_annotation: type_ann,
+                                        visibility,
+                                        is_static: true,
+                                    });
+                                }
+                            }
+                        }
+                    } else if expr.kind() == "type" {
+                        // Bare annotation: `name: str` (no assignment)
+                        if let Some(ident) = expr.child(0) {
+                            if ident.kind() == "identifier" {
+                                let name = get_node_text(&ident, source).to_string();
+                                if seen.insert(name.clone()) {
+                                    let type_ann = expr.child(2)
+                                        .map(|t| get_node_text(&t, source).to_string());
+                                    let visibility = python_field_visibility(&name);
+                                    fields.push(FieldDecl {
+                                        name,
+                                        type_annotation: type_ann,
+                                        visibility,
+                                        is_static: true,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+
+    // Pass 2: Walk all descendants for `self.x = ...` instance field patterns
     let mut stack = vec![*body];
     while let Some(node) = stack.pop() {
-        // Look for `self.X` in assignment targets
         if node.kind() == "assignment" || node.kind() == "augmented_assignment" {
             if let Some(left) = node.child_by_field_name("left") {
                 if left.kind() == "attribute" {
@@ -766,17 +824,10 @@ fn extract_python_class_fields(body_node: Option<&Node>, source: &[u8]) -> Vec<F
                         if get_node_text(&o, source) == "self" {
                             let name = get_node_text(&a, source).to_string();
                             if seen.insert(name.clone()) {
-                                // Check for type annotation
                                 let type_ann = node.child_by_field_name("type")
                                     .map(|t| get_node_text(&t, source).to_string());
                                 let is_static = false;
-                                let visibility = if name.starts_with("__") && !name.ends_with("__") {
-                                    Some("private".to_string())
-                                } else if name.starts_with('_') {
-                                    Some("protected".to_string())
-                                } else {
-                                    Some("public".to_string())
-                                };
+                                let visibility = python_field_visibility(&name);
                                 fields.push(FieldDecl {
                                     name,
                                     type_annotation: type_ann,
@@ -790,17 +841,12 @@ fn extract_python_class_fields(body_node: Option<&Node>, source: &[u8]) -> Vec<F
             }
         }
 
-        // Also handle type-annotated assignments: `self.x: Type = value`
-        if node.kind() == "type_alias_statement" || node.kind() == "expression_statement" {
-            // Check children for patterns
-        }
-
         // Recurse into children
-        let mut cursor = node.walk();
-        if cursor.goto_first_child() {
+        let mut c = node.walk();
+        if c.goto_first_child() {
             loop {
-                stack.push(cursor.node());
-                if !cursor.goto_next_sibling() {
+                stack.push(c.node());
+                if !c.goto_next_sibling() {
                     break;
                 }
             }
@@ -808,6 +854,16 @@ fn extract_python_class_fields(body_node: Option<&Node>, source: &[u8]) -> Vec<F
     }
 
     fields
+}
+
+fn python_field_visibility(name: &str) -> Option<String> {
+    if name.starts_with("__") && !name.ends_with("__") {
+        Some("private".to_string())
+    } else if name.starts_with('_') {
+        Some("protected".to_string())
+    } else {
+        Some("public".to_string())
+    }
 }
 
 fn extract_decorators(node: &Node, source: &[u8]) -> Vec<String> {

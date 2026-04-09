@@ -202,7 +202,7 @@ pub(super) fn detect_leaky_abstraction(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "Public function `{}` exposes internal types in its signature: {}. This couples callers to implementation details.",
+                    "Public `{}` leaks internal types [{}] — couples callers to implementation.",
                     func.name, leaked.join(", ")
                 ),
             });

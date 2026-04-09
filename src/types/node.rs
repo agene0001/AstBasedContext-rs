@@ -255,6 +255,24 @@ impl GraphNode {
         }
     }
 
+    /// Short label for compact output (MCP, CLI). Saves tokens in LLM context.
+    pub fn short_label(&self) -> &'static str {
+        match self {
+            GraphNode::Repository(_) => "repo",
+            GraphNode::Directory(_) => "dir",
+            GraphNode::File(_) => "file",
+            GraphNode::Function(_) => "fn",
+            GraphNode::Class(_) => "cls",
+            GraphNode::Variable(_) => "var",
+            GraphNode::Module(_) => "mod",
+            GraphNode::Trait(_) => "trait",
+            GraphNode::Interface(_) => "iface",
+            GraphNode::Struct(_) => "st",
+            GraphNode::Enum(_) => "enum",
+            GraphNode::Macro(_) => "macro",
+        }
+    }
+
     /// Returns the source snippet for this node, if annotated.
     pub fn source_snippet(&self) -> Option<&str> {
         match self {

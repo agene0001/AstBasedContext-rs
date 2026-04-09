@@ -90,7 +90,7 @@ pub(super) fn detect_vec_used_as_set(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}` in `{}`: `{}` is appended to and searched with `.contains()` but never indexed — consider using a HashSet/Set for O(1) lookups.",
+                        "`{}` in `{}`: `{}` appended+searched but never indexed — use HashSet for O(1).",
                         recv, func.name, recv
                     ),
                 });
@@ -142,7 +142,7 @@ pub(super) fn detect_vec_used_as_map(
                         },
                         node_indices: vec![idx.index()],
                         description: format!(
-                            "`{}` in `{}`: searching a Vec/list of tuples by key is O(n) — consider using a HashMap/dict for O(1) key lookup.",
+                            "`{}` in `{}`: Vec-of-tuples key search is O(n) — use HashMap for O(1).",
                             variable, func.name
                         ),
                     });
@@ -236,7 +236,7 @@ pub(super) fn detect_linear_search_in_loop(
                             },
                             node_indices: vec![idx.index()],
                             description: format!(
-                                "`{}` in `{}`: `{}` inside a loop is O(n) per iteration — pre-compute a HashSet/Set before the loop for O(1) lookups.",
+                                "`{}` in `{}`: `{}` in loop is O(n)/iter — pre-compute HashSet for O(1).",
                                 matched.trim_end_matches('('), func.name, matched.trim_end_matches('(')
                             ),
                         });
@@ -258,7 +258,7 @@ pub(super) fn detect_linear_search_in_loop(
                         },
                         node_indices: vec![idx.index()],
                         description: format!(
-                            "`{}`: `if x in collection` inside a loop may be O(n) per iteration if the collection is a list — use a set for O(1) membership testing.",
+                            "`{}`: `if x in list` in loop may be O(n)/iter — use a set for O(1).",
                             func.name
                         ),
                     });
@@ -369,7 +369,7 @@ pub(super) fn detect_string_concat_in_loop(
                             },
                             node_indices: vec![idx.index()],
                             description: format!(
-                                "`{}`: string concatenation (`{}`) inside a loop causes O(n²) copying — {}.",
+                                "`{}`: `{}` in loop is O(n²) — {}.",
                                 func.name, pattern.trim(), suggestion
                             ),
                         });
@@ -445,7 +445,7 @@ pub(super) fn detect_sorted_vec_for_lookup(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}`: `{}` is sorted then binary-searched — consider using {} which maintains order automatically.",
+                    "`{}`: `{}` sorted then binary-searched — use {} (auto-ordered).",
                     func.name, variable, suggestion
                 ),
             });
@@ -532,7 +532,7 @@ pub(super) fn detect_nested_loop_lookup(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}`: nested loops with an equality check is O(n²) — consider building a HashSet/Set from one collection and checking membership in O(1).",
+                        "`{}`: nested loops + equality check is O(n²) — build a HashSet from one collection for O(1) membership.",
                         func.name
                     ),
                 });
@@ -631,7 +631,7 @@ pub(super) fn detect_hashmap_sequential_keys(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}`: `{}` uses sequential integer keys ({:?}) — a Vec/array indexed by position would be simpler and faster.",
+                        "`{}`: `{}` has sequential int keys {:?} — use Vec/array instead.",
                         func.name, recv, &sorted[..sorted.len().min(5)]
                     ),
                 });
@@ -681,7 +681,7 @@ pub(super) fn detect_excessive_collect_iterate(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}`: `.collect::<Vec<_>>().iter()` allocates a Vec just to iterate it — remove the `.collect()` and use the iterator directly.",
+                        "`{}`: `.collect::<Vec<_>>().iter()` needlessly allocates — remove `.collect()` and iterate directly.",
                         func.name
                     ),
                 });
@@ -704,7 +704,7 @@ pub(super) fn detect_excessive_collect_iterate(
                             },
                             node_indices: vec![idx.index()],
                             description: format!(
-                                "`{}`: collecting into a Vec then immediately iterating allocates unnecessarily — use the iterator chain directly.",
+                                "`{}`: collects to Vec then immediately iterates — unnecessary allocation, use iterator chain directly.",
                                 func.name
                             ),
                         });
@@ -751,7 +751,7 @@ pub(super) fn detect_excessive_collect_iterate(
                                     },
                                     node_indices: vec![idx.index()],
                                     description: format!(
-                                        "`{}`: `{}` is collected into a Vec then immediately iterated — remove the intermediate allocation.",
+                                        "`{}`: `{}` collected to Vec then iterated — remove intermediate allocation.",
                                         func.name, actual_var
                                     ),
                                 });

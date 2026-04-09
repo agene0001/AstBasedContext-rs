@@ -94,7 +94,7 @@ pub(super) fn detect_lack_of_cohesion(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` has low cohesion (LCOM={:.2}, {} methods) — {:.0}% of method pairs share no fields. Consider splitting.",
+                    "`{}`: LCOM={:.2}, {} methods, {:.0}% pairs share no fields — split class.",
                     class_data.name, lcom, methods.len(), lcom * 100.0
                 ),
             });
@@ -142,7 +142,7 @@ pub(super) fn detect_high_coupling(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` is coupled to {} other classes — high coupling makes changes risky.",
+                    "`{}`: CBO={} — high coupling makes changes risky.",
                     node.name(), coupled_classes.len()
                 ),
             });
@@ -191,7 +191,7 @@ pub(super) fn detect_module_instability(
                 },
                 node_indices: vec![file_idx.index()],
                 description: format!(
-                    "`{}` has instability {:.2} ({} outgoing, {} incoming deps) — it depends on many modules but few depend on it.",
+                    "`{}`: instability={:.2} ({} out, {} in deps) — many outgoing deps, few incoming.",
                     file_node.name(), instability, efferent, afferent
                 ),
             });
@@ -205,18 +205,18 @@ pub(super) fn detect_module_instability(
 
 pub(super) fn detect_cognitive_complexity(
     ctx: &AnalysisContext,
-    _findings: &mut Vec<Finding>,
+    findings: &mut Vec<Finding>,
 ) {
     // Cognitive complexity: penalizes nesting more than cyclomatic.
     // We approximate from source: each control flow keyword at nesting depth N adds (1 + N).
-    const _THRESHOLD: u32 = 25;
+    const THRESHOLD: u32 = 25;
 
     let control_keywords = ["if ", "else ", "elif ", "for ", "while ", "switch ", "case ",
         "catch ", "except ", "match ", "? "];
     // Pre-build "} keyword" patterns to avoid format!() per keyword per line
     let brace_keywords: Vec<String> = control_keywords.iter().map(|kw| format!("}} {}", kw)).collect();
 
-    for &(_idx, node) in &ctx.functions {
+    for &(idx, node) in &ctx.functions {
         let func = match node {
             GraphNode::Function(f) => f,
             _ => continue,
@@ -227,7 +227,7 @@ pub(super) fn detect_cognitive_complexity(
             None => continue,
         };
 
-        let mut _score: u32 = 0;
+        let mut score: u32 = 0;
         let base_indent = src.lines().next()
             .map(|l| l.len() - l.trim_start().len())
             .unwrap_or(0);
@@ -246,7 +246,7 @@ pub(super) fn detect_cognitive_complexity(
             // Check for control flow keywords
             for (kw, brace_kw) in control_keywords.iter().zip(brace_keywords.iter()) {
                 if trimmed.starts_with(kw) || trimmed.starts_with(brace_kw.as_str()) {
-                    _score += 1 + nesting;
+                    score += 1 + nesting;
                     break;
                 }
             }
@@ -254,7 +254,22 @@ pub(super) fn detect_cognitive_complexity(
             // Bonus for boolean operators in conditions (adds cognitive load)
             let bool_ops = trimmed.matches(" && ").count() + trimmed.matches(" || ").count()
                 + trimmed.matches(" and ").count() + trimmed.matches(" or ").count();
-            _score += bool_ops as u32;
+            score += bool_ops as u32;
         }
-}
+
+        if score >= THRESHOLD {
+            findings.push(Finding {
+                tier: if score >= 50 { Tier::High } else { Tier::Medium },
+                kind: FindingKind::HighCognitiveComplexity {
+                    function_name: func.name.clone(),
+                    score,
+                },
+                node_indices: vec![idx.index()],
+                description: format!(
+                    "`{}`: cognitive complexity {} (threshold {}) — deeply nested or branching logic.",
+                    func.name, score, THRESHOLD,
+                ),
+            });
+        }
+    }
 }

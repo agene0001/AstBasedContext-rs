@@ -95,8 +95,7 @@ pub(super) fn find_overlapping_structs(
                 },
                 node_indices: indices,
                 description: format!(
-                    "Structs {} share {:.0}% of their fields ({}). \
-                     Consider merging, using composition, or extracting shared fields into a base struct.",
+                    "{} share {:.0}% fields ({}) — merge, compose, or extract shared base.",
                     names.join(", "),
                     overlap * 100.0,
                     shared_fields.join(", "),
@@ -181,8 +180,7 @@ pub(super) fn find_overlapping_enums(
                 },
                 node_indices: indices,
                 description: format!(
-                    "Enums {} share {:.0}% of their variants ({}). \
-                     Consider merging into a single enum or using a shared base.",
+                    "{} share {:.0}% variants ({}) — merge or use shared base.",
                     names.join(", "),
                     overlap * 100.0,
                     shared_variants.join(", "),

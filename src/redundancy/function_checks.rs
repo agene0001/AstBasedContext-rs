@@ -29,8 +29,18 @@ pub(super) fn find_passthroughs(
         };
 
         let line_count = src.lines().count();
-        // Passthrough ctx.functions are short — typically 1-5 lines of actual body
+        // Passthrough functions are short — typically 1-5 lines of actual body
         if line_count > 10 {
+            continue;
+        }
+
+        // A true passthrough has very few statements (just a call and maybe a
+        // let binding). Functions with 2+ semicolons are doing real work even
+        // if the graph only resolved one callee (common when method calls like
+        // .insert(), .clone() fail to resolve, leaving only e.g. HashMap::new()
+        // matched to a project-local new()).
+        let stmt_count = src.matches(';').count();
+        if stmt_count > 1 {
             continue;
         }
 
@@ -49,6 +59,38 @@ pub(super) fn find_passthroughs(
             GraphNode::Function(f) => f,
             _ => continue,
         };
+
+        // ── Rust-specific false-positive filters ────────────────────────
+        if func.language == crate::types::Language::Rust {
+            // FP #2: `impl Default for X { fn default() -> Self { Self::new() } }`
+            // This is the idiomatic Rust pattern — the Default trait requires it.
+            if func.name == "default"
+                && func.context_type.as_deref() == Some("impl_item")
+                && func.context.as_deref() == Some("Default")
+            {
+                continue;
+            }
+
+            if let Some(src) = &func.source {
+                // FP #3 & #5: Constructors that build structs (Self { ... } or ..Default::default())
+                // These aren't passthroughs — they construct and return a struct, possibly
+                // with a side-effect call (e.g., logging).
+                if src.contains("Self {") || src.contains("Self{")
+                    || src.contains("..Default::default()")
+                    || src.contains("..Self::default()")
+                {
+                    continue;
+                }
+
+                // FP #4: Accessor/getter methods that access self fields.
+                // `fn foo(&self) -> T { self.field.clone() }` is a getter, not a passthrough.
+                if func.args.iter().any(|a| a.contains("self"))
+                    && src.contains("self.")
+                {
+                    continue;
+                }
+            }
+        }
 
         // Check if wrapper params are forwarded to the callee
         let wrapper_args: HashSet<&str> = func.args.iter().map(|a| a.as_str()).collect();
@@ -88,14 +130,12 @@ pub(super) fn find_passthroughs(
 
         let desc = if exact_forward {
             format!(
-                "`{}` is a passthrough wrapper that forwards all parameters to `{}`. \
-                 Unless it serves as a public API facade, it can be replaced with a direct call.",
+                "`{}` forwards all args to `{}` — replace with direct call unless it's a facade",
                 func.name, callee_func.name,
             )
         } else {
             format!(
-                "`{}` delegates to `{}` with minimal logic ({}  lines, complexity {}). \
-                 Consider if this indirection is necessary.",
+                "`{}` delegates to `{}` ({}L, cc={}) — unnecessary indirection?",
                 func.name, callee_func.name, line_count, func.cyclomatic_complexity,
             )
         };
@@ -114,6 +154,55 @@ pub(super) fn find_passthroughs(
     }
 }
 
+/// Check if two functions should be skipped for near-duplicate detection.
+///
+/// Returns true for Rust-specific patterns where identical code is required:
+/// - Trait impl methods: same trait implemented on different types (language-mandated)
+/// - Same-name constructors on different types returning Self (can't be shared)
+/// - Display/Debug trait fmt() implementations
+fn should_skip_near_duplicate(node_a: &GraphNode, node_b: &GraphNode) -> bool {
+    let (func_a, func_b) = match (node_a, node_b) {
+        (GraphNode::Function(a), GraphNode::Function(b)) => (a, b),
+        _ => return false,
+    };
+
+    // Only apply to Rust code
+    if func_a.language != crate::types::Language::Rust
+        || func_b.language != crate::types::Language::Rust
+    {
+        return false;
+    }
+
+    let different_types = func_a.class_context.is_some()
+        && func_b.class_context.is_some()
+        && func_a.class_context != func_b.class_context;
+
+    if different_types {
+        // FP #1: Both are trait impl methods of the same trait on different types.
+        // e.g., `impl DataSource for MLB` and `impl DataSource for NBA` both have `sport_id()`.
+        let same_trait_impl = func_a.context_type.as_deref() == Some("impl_item")
+            && func_b.context_type.as_deref() == Some("impl_item")
+            && func_a.context.is_some()
+            && func_a.context == func_b.context
+            && func_a.name == func_b.name;
+        if same_trait_impl {
+            return true;
+        }
+
+        // FP #6: Same-name constructors/factory methods on different types that return Self.
+        // e.g., `ESPNApiClient::football()` and `ESPNGameScraper::football()`.
+        if func_a.name == func_b.name {
+            let a_returns_self = func_a.source.as_deref().is_some_and(|s| s.contains("Self"));
+            let b_returns_self = func_b.source.as_deref().is_some_and(|s| s.contains("Self"));
+            if a_returns_self && b_returns_self {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 2: Near-duplicates (normalized source comparison)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -122,7 +211,7 @@ pub(super) fn find_near_duplicates(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
-    let annotated: Vec<(NodeIndex, &str, &str, HashSet<&str>, usize)> = ctx.functions
+    let annotated: Vec<(NodeIndex, &str, &str, HashSet<&str>, usize, &GraphNode)> = ctx.functions
         .iter()
         .filter_map(|&(idx, node)| {
             let src = node.source_snippet()?;
@@ -132,7 +221,7 @@ pub(super) fn find_near_duplicates(
             }
             let name = node.name();
             let token_set = normalize_tokens_set(src);
-            Some((idx, name, src, token_set, line_count))
+            Some((idx, name, src, token_set, line_count, node))
         })
         .collect();
 
@@ -155,6 +244,10 @@ pub(super) fn find_near_duplicates(
             }
             let sim = jaccard_sets(&annotated[i].3, &annotated[j].3);
             if sim >= ctx.config.near_duplicate_threshold {
+                // Check for Rust-specific false positives before grouping
+                if should_skip_near_duplicate(&annotated[i].5, &annotated[j].5) {
+                    continue;
+                }
                 group.push(j);
                 used[j] = true;
             }
@@ -180,10 +273,8 @@ pub(super) fn find_near_duplicates(
                 },
                 node_indices: indices,
                 description: format!(
-                    "Near-duplicate code ({:.0}% similar): {}. \
-                     These likely do the same thing with cosmetic differences.",
-                    sim * 100.0,
-                    names.join(", "),
+                    "near-duplicate ({:.0}%): {} — likely cosmetic differences only",
+                    sim * 100.0, names.join(", "),
                 ),
             });
         }
@@ -198,7 +289,7 @@ pub(super) fn find_structural_similar(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
-    let annotated: Vec<(NodeIndex, &str, HashSet<&str>, usize)> = ctx.functions
+    let annotated: Vec<(NodeIndex, &str, HashSet<&str>, usize, &GraphNode)> = ctx.functions
         .iter()
         .filter_map(|&(idx, node)| {
             let src = node.source_snippet()?;
@@ -207,7 +298,7 @@ pub(super) fn find_structural_similar(
                 return None;
             }
             let token_set = extract_tokens_set(src);
-            Some((idx, node.name(), token_set, line_count))
+            Some((idx, node.name(), token_set, line_count, node))
         })
         .collect();
 
@@ -232,6 +323,9 @@ pub(super) fn find_structural_similar(
             // Only flag if above structural threshold but below near-duplicate
             // (near-duplicates are already caught in check 2)
             if sim >= ctx.config.structural_threshold && sim < ctx.config.near_duplicate_threshold {
+                if should_skip_near_duplicate(&annotated[i].4, &annotated[j].4) {
+                    continue;
+                }
                 group.push(j);
                 used[j] = true;
             }
@@ -251,10 +345,8 @@ pub(super) fn find_structural_similar(
                 },
                 node_indices: indices,
                 description: format!(
-                    "Structurally similar code ({:.0}% token overlap): {}. \
-                     These may serve similar purposes — check if a shared abstraction is possible.",
-                    sim * 100.0,
-                    names.join(", "),
+                    "structurally similar ({:.0}%): {} — consider shared abstraction",
+                    sim * 100.0, names.join(", "),
                 ),
             });
         }
@@ -328,8 +420,7 @@ pub(super) fn find_merge_candidates(
                         },
                         node_indices: indices,
                         description: format!(
-                            "`{}` and `{}` share {:.0}% of their lines but differ in specific sections. \
-                             Consider merging into a single function with a parameter to select behavior.",
+                            "`{}` and `{}` share {:.0}% lines — merge with a parameter to select behavior",
                             names[0], names[1], shared_ratio * 100.0,
                         ),
                     });
@@ -393,8 +484,7 @@ pub(super) fn find_split_candidates(
             },
             node_indices: vec![idx.index()],
             description: format!(
-                "`{}` is {} lines with cyclomatic complexity {} and ~{} distinct sections. \
-                 Consider extracting sections into separate ctx.functions for clarity and testability.",
+                "`{}`: {}L, cc={}, ~{} sections — consider splitting",
                 func.name, line_count, complexity, sections,
             ),
         });

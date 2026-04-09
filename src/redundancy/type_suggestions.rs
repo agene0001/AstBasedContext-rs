@@ -53,8 +53,7 @@ pub(super) fn suggest_parameter_structs(
             },
             node_indices: indices,
             description: format!(
-                "Functions {} all take the same {} parameters ({}). \
-                 Consider grouping these into a config/options struct.",
+                "{} share {} params ({}) — group into a config struct.",
                 names.join(", "),
                 params.len(),
                 params.join(", "),
@@ -103,8 +102,7 @@ pub(super) fn suggest_parameter_structs(
                     },
                     node_indices: indices,
                     description: format!(
-                        "Functions {} share {} parameters ({}). \
-                         Consider grouping the common parameters into a struct.",
+                        "{} share {} params ({}) — group into a struct.",
                         names.join(" and "),
                         shared_params.len(),
                         shared_params.join(", "),
@@ -203,8 +201,7 @@ pub(super) fn suggest_enum_dispatch(
             },
             node_indices: vec![idx.index()],
             description: format!(
-                "`{}` uses flag parameter(s) {} to control branching (complexity {}). \
-                 Consider replacing with an enum type for type-safe dispatch.",
+                "`{}`: flag params {} control branching (cc={}) — use enum for type-safe dispatch.",
                 func.name,
                 flag_params.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", "),
                 func.cyclomatic_complexity,
@@ -326,8 +323,7 @@ pub(super) fn suggest_trait_extraction(
                 },
                 node_indices: indices,
                 description: format!(
-                    "Types {} share {} methods ({}). \
-                     Consider extracting a trait/interface for the common behavior.",
+                    "{} share {} methods ({}) — extract a trait/interface.",
                     names.join(", "),
                     shared_methods.len(),
                     shared_methods.join(", "),

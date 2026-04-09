@@ -337,6 +337,11 @@ impl GraphBuilder {
             for tr in &result.traits {
                 let idx = graph.add_node(GraphNode::Trait(tr.clone()));
                 graph.add_edge(file_idx, idx, EdgeKind::Contains);
+                // Register in class_nodes so trait method impls link via CONTAINS
+                class_nodes
+                    .entry(Self::node_key(&tr.name, file_path))
+                    .or_default()
+                    .push(idx);
             }
 
             // Interfaces
@@ -349,12 +354,39 @@ impl GraphBuilder {
             for st in &result.structs {
                 let idx = graph.add_node(GraphNode::Struct(st.clone()));
                 graph.add_edge(file_idx, idx, EdgeKind::Contains);
+                // Register in class_nodes so impl methods link via CONTAINS
+                class_nodes
+                    .entry(Self::node_key(&st.name, file_path))
+                    .or_default()
+                    .push(idx);
             }
 
             // Enums
             for en in &result.enums {
                 let idx = graph.add_node(GraphNode::Enum(en.clone()));
                 graph.add_edge(file_idx, idx, EdgeKind::Contains);
+            }
+
+            // Re-link methods to structs/traits (registered after the first re-link pass)
+            for func in &result.functions {
+                if let Some(class_name) = &func.class_context {
+                    if let Some(class_indices) =
+                        class_nodes.get(&Self::node_key(class_name, file_path))
+                    {
+                        if let Some(&class_idx) = class_indices.last() {
+                            // Only add if the target is a Struct or Trait (Classes were handled above)
+                            if matches!(graph.graph[class_idx], GraphNode::Struct(_) | GraphNode::Trait(_)) {
+                                if let Some(func_indices) =
+                                    func_nodes.get(&Self::node_key(&func.name, file_path))
+                                {
+                                    if let Some(&func_idx) = func_indices.last() {
+                                        graph.add_edge(class_idx, func_idx, EdgeKind::Contains);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Macros
@@ -498,10 +530,36 @@ impl GraphBuilder {
                             .and_then(|v| v.last().copied())
                     })
                     .or_else(|| {
-                        // Global fallback by name
+                        // Global fallback by name.
+                        // If the call is qualified (e.g. `HashMap::new`, `self.field.len`),
+                        // only match if the qualifier aligns with the target's context.
+                        // This prevents e.g. `HashMap::new()` from resolving to a
+                        // project-local `Cache::new()`.
+                        let qualifier = if call.full_name.contains("::") {
+                            call.full_name.rsplit("::").nth(1)
+                        } else if call.full_name.contains('.') {
+                            call.full_name.rsplit('.').nth(1)
+                        } else {
+                            None
+                        };
                         global_func_lookup
                             .get(called_name.as_str())
-                            .and_then(|v| v.first().copied())
+                            .and_then(|candidates| {
+                                if let Some(q) = qualifier {
+                                    // Qualified call: only match if a candidate's
+                                    // class_context matches the qualifier.
+                                    candidates.iter().find(|&&idx| {
+                                        if let Some(GraphNode::Function(f)) = graph.graph.node_weight(idx) {
+                                            f.class_context.as_deref() == Some(q)
+                                        } else {
+                                            false
+                                        }
+                                    }).copied()
+                                } else {
+                                    // Unqualified call: use first match.
+                                    candidates.first().copied()
+                                }
+                            })
                     });
 
                 if let (Some(from), Some(to)) = (caller_idx, callee_idx) {

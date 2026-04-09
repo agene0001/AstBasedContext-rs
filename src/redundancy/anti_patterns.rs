@@ -59,9 +59,7 @@ pub(super) fn detect_god_class(
             },
             node_indices: vec![idx.index()],
             description: format!(
-                "{} `{}` has {} ctx.functions/methods (threshold: {}). \
-                 Consider splitting into smaller, focused modules or classes \
-                 with single responsibilities.",
+                "{} `{}`: {} functions (threshold {}) — split into focused modules.",
                 node_type, name, method_count, threshold,
             ),
         });
@@ -177,9 +175,7 @@ pub(super) fn detect_circular_dependencies(
             },
             node_indices: cycle_node_indices,
             description: format!(
-                "Circular dependency detected between {} files: {}. \
-                 Circular dependencies make code harder to understand, test, \
-                 and refactor. Consider extracting shared logic into a new module.",
+                "Circular dep: {} files [{}] — extract shared logic to break cycle.",
                 scc.len(),
                 cycle_names.join(" → "),
             ),
@@ -265,8 +261,7 @@ pub(super) fn detect_feature_envy(
                     },
                     node_indices: vec![idx.index(), envied_idx.index()],
                     description: format!(
-                        "`{}` in `{}` calls {} methods on `{}` but only {} on its own class. \
-                         This function may belong in `{}` instead.",
+                        "`{}` in `{}`: {} calls on `{}` vs {} on own class — may belong in `{}`.",
                         func.name, own_class_name, envied_calls, envied_name,
                         own_calls, envied_name,
                     ),
@@ -340,9 +335,7 @@ pub(super) fn detect_shotgun_surgery(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "Changing `{}` would affect {} callers across {} modules. \
-                     High coupling — consider stabilizing the interface, \
-                     adding an abstraction layer, or consolidating callers.",
+                    "`{}`: {} callers across {} modules — stabilize interface or add abstraction layer.",
                     func.name, callers.len(), affected,
                 ),
             });
@@ -404,7 +397,7 @@ pub(super) fn detect_dead_code(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` in {} is never called — potential dead code.",
+                    "`{}` in {} is never called — dead code.",
                     func.name,
                     func.path.file_name().unwrap_or_default().to_string_lossy()
                 ),
@@ -439,7 +432,7 @@ pub(super) fn detect_long_parameter_list(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` takes {} parameters — consider grouping related params into a struct or using a builder.",
+                    "`{}`: {} params — group into a struct or use a builder.",
                     func.name, effective_count
                 ),
             });
@@ -523,7 +516,7 @@ pub(super) fn detect_data_clumps(
                 },
                 node_indices: vec![],
                 description: format!(
-                    "Parameters [{}] appear together in {} ctx.functions ({}) — consider grouping into a struct.",
+                    "Params [{}] co-occur in {} functions ({}) — group into a struct.",
                     params.join(", "),
                     unique.len(),
                     unique.join(", ")
@@ -602,7 +595,7 @@ pub(super) fn detect_middle_man(
                     },
                     node_indices: vec![class_idx.index()],
                     description: format!(
-                        "`{}` delegates {:.0}% of its {} methods to `{}` — consider removing the middleman.",
+                        "`{}` delegates {:.0}% of {} methods to `{}` — remove the middleman.",
                         class_name, ratio * 100.0, total, target
                     ),
                 });
@@ -659,7 +652,7 @@ pub(super) fn detect_lazy_class(
                     },
                     node_indices: vec![class_idx.index()],
                     description: format!(
-                        "`{}` has only {} trivial method(s) — consider inlining into its caller or merging with a related class.",
+                        "`{}`: {} trivial method(s) — inline into caller or merge with related class.",
                         class_data.name, methods.len()
                     ),
                 });
@@ -764,7 +757,7 @@ pub(super) fn detect_refused_bequest(
                             },
                             node_indices: vec![child_idx.index()],
                             description: format!(
-                                "`{}` inherits from `{}` but doesn't override or call any of its methods — consider using composition instead.",
+                                "`{}` inherits `{}` but overrides/calls none of its methods — prefer composition.",
                                 child_data.name, parent_name
                             ),
                         });
@@ -783,13 +776,13 @@ pub(super) fn detect_speculative_generality(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
-    // Find interfaces/traits with exactly one implementor
+    // Find interfaces/traits/abstract-base-classes with exactly one implementor
     let abstractions: Vec<(NodeIndex, &GraphNode)> = ctx.graph
         .graph
         .node_indices()
         .filter_map(|idx| {
             let node = &ctx.graph.graph[idx];
-            if matches!(node, GraphNode::Trait(_) | GraphNode::Interface(_)) {
+            if matches!(node, GraphNode::Trait(_) | GraphNode::Interface(_) | GraphNode::Class(_)) {
                 Some((idx, node))
             } else {
                 None
@@ -808,7 +801,7 @@ pub(super) fn detect_speculative_generality(
                 },
                 node_indices: vec![abs_idx.index(), implementors[0].0.index()],
                 description: format!(
-                    "`{}` has only one implementor (`{}`) — unless you expect more, this abstraction may be premature.",
+                    "`{}` has one implementor (`{}`) — abstraction may be premature.",
                     abs_node.name(), implementors[0].1.name()
                 ),
             });
@@ -881,7 +874,7 @@ pub(super) fn detect_inappropriate_intimacy(
             },
             node_indices: vec![],
             description: format!(
-                "`{}` and `{}` are tightly coupled ({} calls A→B, {} calls B→A) — consider extracting shared logic or introducing a mediator.",
+                "`{}` ↔ `{}`: {} A→B, {} B→A calls — extract shared logic or introduce mediator.",
                 a, b, a_to_b, b_to_a
             ),
         });
@@ -915,7 +908,7 @@ pub(super) fn detect_deep_nesting(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` has cyclomatic complexity {} ({} lines) — consider extracting helper ctx.functions or using early returns to reduce nesting.",
+                    "`{}`: cc={}, {}L — extract helpers or use early returns.",
                     func.name, func.cyclomatic_complexity, line_count
                 ),
             });
@@ -975,7 +968,7 @@ pub(super) fn detect_divergent_change(
                 },
                 node_indices: vec![file_idx.index()],
                 description: format!(
-                    "`{}` is called from {} different modules — it may be changing for too many reasons. Consider splitting by responsibility.",
+                    "`{}` called from {} modules — too many reasons to change, split by responsibility.",
                     file_node.name(), caller_dirs.len()
                 ),
             });
@@ -1050,7 +1043,7 @@ pub(super) fn detect_parallel_inheritance(
                     },
                     node_indices: vec![],
                     description: format!(
-                        "Hierarchies `{}` and `{}` have {} paired subclasses — consider merging with composition or generics.",
+                        "Hierarchies `{}` and `{}`: {} paired subclasses — merge with composition or generics.",
                         parent_a, parent_b, paired
                     ),
                 });
@@ -1112,7 +1105,7 @@ pub(super) fn detect_primitive_obsession(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` takes {} primitive-only parameters [{}] — consider introducing domain types.",
+                    "`{}`: {} primitive-only params [{}] — introduce domain types.",
                     func.name, primitive_params.len(),
                     primitive_params.join(", ")
                 ),
@@ -1149,7 +1142,7 @@ pub(super) fn detect_large_class(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}` is {} lines — consider splitting into smaller, focused classes.",
+                        "`{}`: {}L — split into focused classes.",
                         name, line_count
                     ),
                 });
@@ -1195,8 +1188,18 @@ pub(super) fn detect_unstable_dependency(
     use petgraph::visit::EdgeRef;
     let mut reported: HashSet<(String, String)> = HashSet::new();
 
+    // Build file stem → file_caller_count lookup for module resolution
+    let file_stem_to_path: HashMap<String, (String, String)> = file_caller_count
+        .iter()
+        .filter_map(|(path, &count)| {
+            let p = std::path::Path::new(path);
+            let stem = p.file_stem()?.to_string_lossy().to_string();
+            let name = p.file_name()?.to_string_lossy().to_string();
+            Some((stem, (path.clone(), name)))
+        })
+        .collect();
+
     for &(idx, node) in &ctx.files {
-        let _fd = if let GraphNode::File(fd) = node { fd } else { continue };
         if let GraphNode::File(fd) = node {
             let own_path = fd.path.display().to_string();
 
@@ -1205,9 +1208,16 @@ pub(super) fn detect_unstable_dependency(
                     continue;
                 }
                 let target = &ctx.graph.graph[edge.target()];
-                if let GraphNode::File(dep_fd) = target {
-                    let dep_path = dep_fd.path.display().to_string();
-                    let fan_in = file_caller_count.get(&dep_path).copied().unwrap_or(0);
+
+                // Imports point to Module nodes; resolve module name to file path
+                let module_name = target.name();
+                let module_stem = module_name.split('.').next_back().unwrap_or(module_name);
+
+                if let Some((dep_path, dep_name)) = file_stem_to_path.get(module_stem) {
+                    if *dep_path == own_path {
+                        continue;
+                    }
+                    let fan_in = file_caller_count.get(dep_path).copied().unwrap_or(0);
 
                     if fan_in >= HIGH_FAN_IN {
                         let key = (own_path.clone(), dep_path.clone());
@@ -1218,13 +1228,13 @@ pub(super) fn detect_unstable_dependency(
                             tier: Tier::Low,
                             kind: FindingKind::UnstableDependency {
                                 dependent_name: fd.name.clone(),
-                                dependency_name: dep_fd.name.clone(),
+                                dependency_name: dep_name.clone(),
                                 dependency_caller_count: fan_in,
                             },
                             node_indices: vec![idx.index(), edge.target().index()],
                             description: format!(
-                                "`{}` depends on `{}` which has {} callers — changes there ripple widely.",
-                                fd.name, dep_fd.name, fan_in
+                                "`{}` → `{}` ({} callers) — high-ripple dependency.",
+                                fd.name, dep_name, fan_in
                             ),
                         });
                     }
@@ -1285,7 +1295,7 @@ pub(super) fn detect_anemic_domain_model(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` has {}/{} getter/setter methods — consider adding domain behavior instead of exposing raw data.",
+                    "`{}`: {}/{} getters/setters — add domain behavior instead of exposing raw data.",
                     node.name(), gs_count, methods.len()
                 ),
             });
@@ -1334,9 +1344,8 @@ pub(super) fn detect_magic_numbers(
                 }
                 // Check if it's a number
                 if clean.parse::<f64>().is_ok() && !allowed_numbers.contains(clean) {
-                    // Skip if it's part of a constant definition
+                    // Skip constant definitions and duplicates
                     if !trimmed.contains("const ") && !trimmed.contains("CONST")
-                        && !trimmed.to_uppercase().contains(clean)
                         && !literals.contains(&clean.to_string())
                     {
                         literals.push(clean.to_string());
@@ -1354,7 +1363,7 @@ pub(super) fn detect_magic_numbers(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` contains {} magic numbers [{}] — consider extracting as named constants.",
+                    "`{}`: {} magic numbers [{}] — extract as named constants.",
                     func.name, literals.len(),
                     literals.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
                 ),
@@ -1406,7 +1415,7 @@ pub(super) fn detect_mutable_global_state(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "`{}` in `{}` is module-level mutable state — consider encapsulating in a class or using dependency injection.",
+                        "`{}` in `{}`: module-level mutable state — encapsulate in a class or inject as dependency.",
                         v.name, file_name
                     ),
                 });
@@ -1459,7 +1468,7 @@ pub(super) fn detect_empty_catch(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` has an empty catch/except block — errors are silently swallowed.",
+                    "`{}`: empty catch/except — errors silently swallowed.",
                     func.name
                 ),
             });
@@ -1519,7 +1528,7 @@ pub(super) fn detect_callback_hell(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` has {} levels of nested callbacks/closures — consider using async/await, promises, or extracting named ctx.functions.",
+                    "`{}`: {} nested callback levels — use async/await or extract named functions.",
                     func.name, max_nesting
                 ),
             });
@@ -1594,7 +1603,7 @@ pub(super) fn detect_api_inconsistency(
                 },
                 node_indices: vec![],
                 description: format!(
-                    "Functions with prefix `{}` have inconsistent signatures ({}-{} params across {} ctx.functions) — consider standardizing.",
+                    "`{}` prefix: {}-{} params across {} functions — standardize signatures.",
                     prefix, min_count, max_count, group.len()
                 ),
             });

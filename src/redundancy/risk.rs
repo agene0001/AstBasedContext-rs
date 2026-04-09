@@ -88,7 +88,7 @@ pub(super) fn detect_high_risk_functions(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "`{}` has risk score {:.2}: {}. This function needs careful attention before refactoring.",
+                    "`{}`: risk={:.2} — {}.",
                     func.name, risk, factors.join(", ")
                 ),
             });

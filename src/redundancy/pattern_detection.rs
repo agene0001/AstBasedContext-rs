@@ -72,11 +72,11 @@ pub(super) fn detect_singleton(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "Class `{}` appears to implement the singleton pattern{}{}{}.",
+                    "`{}`: Singleton{}{}{}.",
                     class_name,
-                    if has_private_constructor { " (private constructor)" } else { "" },
-                    if has_self_typed_field { " (static self-typed field)" } else { "" },
-                    if has_static_accessor { " (static accessor)" } else { "" },
+                    if has_private_constructor { " — private constructor" } else { "" },
+                    if has_self_typed_field { ", static self-typed field" } else { "" },
+                    if has_static_accessor { ", static accessor" } else { "" },
                 ),
             });
         }
@@ -91,12 +91,13 @@ pub(super) fn detect_adapter(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
-    // Collect all interface/trait names for quick lookup
+    // Collect all interface/trait/abstract-class names for quick lookup
     let mut interface_names: HashSet<String> = HashSet::new();
     for idx in ctx.graph.graph.node_indices() {
         match &ctx.graph.graph[idx] {
             GraphNode::Trait(t) => { interface_names.insert(t.name.clone()); }
             GraphNode::Interface(i) => { interface_names.insert(i.name.clone()); }
+            GraphNode::Class(c) => { interface_names.insert(c.name.clone()); }
             _ => {}
         }
     }
@@ -108,11 +109,11 @@ pub(super) fn detect_adapter(
             _ => continue,
         };
 
-        // Check: does this class implement an interface?
+        // Check: does this class implement an interface or inherit from an abstract base?
         let implemented_interfaces: Vec<String> = ctx.graph
             .outgoing_edges(idx)
             .into_iter()
-            .filter(|(_, k)| matches!(k, EdgeKind::Implements))
+            .filter(|(_, k)| matches!(k, EdgeKind::Implements | EdgeKind::Inherits))
             .filter_map(|(target, _)| ctx.graph.get_node(target).map(|n| n.name().to_string()))
             .collect();
 
@@ -153,9 +154,7 @@ pub(super) fn detect_adapter(
                         },
                         node_indices: vec![idx.index()],
                         description: format!(
-                            "Class `{}` implements `{}` and wraps a `{}` field — \
-                             this looks like the adapter pattern, translating \
-                             the `{}` interface to `{}`.",
+                            "`{}` implements `{}` wrapping `{}` field — Adapter pattern (`{}` → `{}`).",
                             class_name, implemented_interfaces[0], field_type,
                             implemented_interfaces[0], field_type,
                         ),
@@ -210,9 +209,7 @@ pub(super) fn detect_proxy(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "Class `{}` implements `{}` and wraps a field of the same type — \
-                         this looks like the proxy pattern (adds a layer of indirection \
-                         before delegating to the real implementation).",
+                        "`{}` implements and wraps `{}` — Proxy pattern (indirection before delegation).",
                         class_name, field_type,
                     ),
                 });
@@ -230,11 +227,12 @@ pub(super) fn detect_command(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
-    // Find interfaces/traits with exactly 1 method
+    // Find interfaces/traits/abstract classes with exactly 1 method
     for idx in ctx.graph.graph.node_indices() {
         let interface_name = match &ctx.graph.graph[idx] {
             GraphNode::Trait(t) => t.name.clone(),
             GraphNode::Interface(i) => i.name.clone(),
+            GraphNode::Class(c) => c.name.clone(),
             _ => continue,
         };
 
@@ -256,7 +254,7 @@ pub(super) fn detect_command(
         }
         let method_name = &methods[0];
 
-        // Check if 3+ classes implement this interface
+        // Check if 3+ classes implement/inherit this interface
         let implementors = ctx.graph.get_implementors(idx);
         if implementors.len() < 3 {
             continue;
@@ -278,8 +276,7 @@ pub(super) fn detect_command(
                 .chain(implementors.iter().map(|(i, _)| i.index()))
                 .collect(),
             description: format!(
-                "Interface `{}` has a single method `{}` with {} implementors ({}). \
-                 This is the command pattern — each implementor encapsulates a different action.",
+                "`{}::{}` — {} implementors ({}): Command pattern.",
                 interface_name, method_name, command_names.len(), command_names.join(", "),
             ),
         });
@@ -337,9 +334,7 @@ pub(super) fn detect_chain_of_responsibility(
                     },
                     node_indices: vec![idx.index()],
                     description: format!(
-                        "Class `{}` has a field `{}` of type `{}` that references \
-                         its own type/interface — this looks like the chain of responsibility \
-                         pattern, where each handler either processes a request or passes it on.",
+                        "`{}::{}` (`{}`) self-references — Chain of Responsibility pattern.",
                         class_name, field.name, field_type,
                     ),
                 });
@@ -357,7 +352,7 @@ pub(super) fn detect_dependency_injection(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
-    // Collect all interface/trait names
+    // Collect all interface/trait/abstract-class names
     let interface_names: HashSet<String> = ctx.graph
         .graph
         .node_indices()
@@ -365,6 +360,8 @@ pub(super) fn detect_dependency_injection(
             match &ctx.graph.graph[idx] {
                 GraphNode::Trait(t) => Some(t.name.clone()),
                 GraphNode::Interface(i) => Some(i.name.clone()),
+                // Include abstract base classes (Python ABC, etc.)
+                GraphNode::Class(c) if ctx.graph.get_implementors(idx).len() > 0 => Some(c.name.clone()),
                 _ => None,
             }
         })
@@ -431,9 +428,7 @@ pub(super) fn detect_dependency_injection(
                 },
                 node_indices: vec![idx.index()],
                 description: format!(
-                    "Constructor `{}::{}` takes {} interface-typed parameter(s): {}. \
-                     This is dependency injection — the class depends on abstractions, \
-                     not concrete implementations.",
+                    "`{}::{}`: {} interface param(s) {} — dependency injection detected.",
                     class_name,
                     func.name,
                     interface_params.len(),
@@ -578,7 +573,7 @@ pub(super) fn detect_state(
         .node_indices()
         .filter_map(|idx| {
             let node = &ctx.graph.graph[idx];
-            if matches!(node, GraphNode::Trait(_) | GraphNode::Interface(_)) {
+            if matches!(node, GraphNode::Trait(_) | GraphNode::Interface(_) | GraphNode::Class(_)) {
                 Some((idx, node))
             } else {
                 None
@@ -1033,7 +1028,7 @@ pub(super) fn detect_fluent_builder(
         let fluent_methods: Vec<String> = methods.iter()
             .filter(|(_name, ret)| {
                 if let Some(rt) = ret {
-                    let clean = rt.trim();
+                    let clean = rt.trim().trim_matches('"').trim_matches('\'');
                     self_return_patterns.contains(&clean)
                         || clean == class_name.as_str()
                         || clean == format!("&{}", class_name)
