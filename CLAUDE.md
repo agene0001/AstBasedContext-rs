@@ -87,8 +87,8 @@ When `GraphBuilder::build_with_options(path, true)` is called, the `annotate` mo
 - Snippets are truncated at 4KB per node
 - `GraphNode::source_snippet()` accessor returns `Option<&str>`
 - The `find_similar_nodes()` query uses Jaccard token similarity + line count ratio to group potentially redundant nodes
-- `redundancy.rs` provides tiered analysis across 102 checks in 10+ categories
-- 102 check types across `FindingKind` enum, each assigned a `Tier` (Critical/High/Medium/Low)
+- `redundancy.rs` provides tiered analysis across 132 checks in 18 categories
+- 132 check types across `FindingKind` enum, each assigned a `Tier` (Critical/High/Medium/Low)
 - Checks 1-5: function-level redundancy (passthrough, near-duplicate, similar, merge, split)
 - Checks 6-7: struct/enum overlap
 - Checks 8-10: type suggestions (parameter struct, enum dispatch, trait extraction)
@@ -113,6 +113,7 @@ When `GraphBuilder::build_with_options(path, true)` is called, the `annotate` mo
 - Checks 88-91: configuration detection (env var usage, hardcoded endpoints, feature flags, config file usage)
 - Checks 92-99: data structure suggestions (vec-as-set, vec-as-map, linear search in loop, string concat in loop, sorted vec lookup, nested loop lookup, hashmap sequential keys, excessive collect-iterate)
 - Checks 100-102: code quality (unused imports, inconsistent error handling, tech debt comments)
+- Checks 103-132: optimization & resources (clone-in-loop, redundant collect, repeated lookup, vec-no-presize, sort-then-find, list-concat-loop, unbounded recursion, vectorization, polars suggestion, regex-recompile, memoization candidate, exception-for-control-flow, N+1 query, sync-async conflict, repeated-format-in-loop, sleep-in-loop, generator-over-list, unnecessary-chain, large-list-in, dict-keys-iter, unclosed-resource, enumerate-vs-range-len, yield-from, append-loop-extend, double-with, import-in-function, constant-condition, redundant-negation, default-dict-pattern, empty-string-check)
 - This is opt-in because it increases graph size ~40%
 
 ### Graph save/load

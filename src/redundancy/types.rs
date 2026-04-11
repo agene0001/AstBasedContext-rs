@@ -705,6 +705,203 @@ pub enum FindingKind {
         marker: String,
         comment_text: String,
     },
+
+    // ── Optimization suggestions (checks 103-109) ────────────────────────
+
+    /// Expensive clone/allocation inside a loop body.
+    CloneInLoop {
+        function_name: String,
+        pattern: String,
+    },
+
+    /// `.collect()` immediately followed by `.iter()` / `.into_iter()` — skip the allocation.
+    RedundantCollectIterate {
+        function_name: String,
+        pattern: String,
+    },
+
+    /// Same map key looked up 2+ times — cache in a local variable.
+    RepeatedMapLookup {
+        function_name: String,
+        key_hint: String,
+        count: usize,
+    },
+
+    /// Vec/list created then pushed to in a loop without pre-sizing.
+    VecNoPresize {
+        function_name: String,
+        variable_hint: String,
+    },
+
+    /// `.sort()` followed by `.iter().find()` — use `.binary_search()` or sorted data structure.
+    SortThenFind {
+        function_name: String,
+        variable_hint: String,
+    },
+
+    /// Python `list += list` or `list.extend(list)` inside loop — O(n²) total; build once outside.
+    ListConcatInLoop {
+        function_name: String,
+        variable_hint: String,
+    },
+
+    /// Recursive function with no depth/limit parameter — risk of stack overflow.
+    UnboundedRecursion {
+        function_name: String,
+    },
+
+    /// Loop with element-wise array arithmetic — candidate for SIMD or NumPy vectorization.
+    SuggestVectorize {
+        function_name: String,
+        pattern: String,
+        suggestion: String,
+    },
+
+    /// Pandas usage that could benefit from Polars for better performance.
+    SuggestPolars {
+        function_name: String,
+        pattern: String,
+    },
+
+    // ── Optimization suggestions (checks 112-117) ────────────────────────
+
+    /// Regex compiled inside a loop — compile once outside.
+    RegexRecompileInLoop {
+        function_name: String,
+        pattern: String,
+    },
+
+    /// Pure-looking function called multiple times with identical arguments — memoize.
+    MemoizationCandidate {
+        function_name: String,
+        callee: String,
+        repeat_count: usize,
+    },
+
+    /// Exception/error used for normal control flow instead of conditional checks.
+    ExceptionForControlFlow {
+        function_name: String,
+        pattern: String,
+    },
+
+    /// Database/API call inside a loop body — batch or prefetch.
+    NPlusOneQuery {
+        function_name: String,
+        call_pattern: String,
+    },
+
+    /// Blocking/synchronous call inside an async function.
+    SyncAsyncConflict {
+        function_name: String,
+        blocking_call: String,
+    },
+
+    /// Repeated string formatting with same template inside a loop.
+    RepeatedFormatInLoop {
+        function_name: String,
+        pattern: String,
+    },
+
+    // ── Optimization suggestions (checks 118-122) ────────────────────────
+
+    /// `sleep()` inside a loop body — busy-wait / polling pattern.
+    SleepInLoop {
+        function_name: String,
+        pattern: String,
+    },
+
+    /// List comprehension passed to aggregate — use generator expression instead.
+    GeneratorOverList {
+        function_name: String,
+        pattern: String,
+    },
+
+    /// Chainable iterator operations that can be fused (e.g. `.map().filter()` → `.filter_map()`).
+    UnnecessaryChain {
+        function_name: String,
+        pattern: String,
+        suggestion: String,
+    },
+
+    /// Membership test on a list literal — use a set literal for O(1) lookup.
+    LargeListIn {
+        function_name: String,
+        pattern: String,
+    },
+
+    /// `for k in dict.keys()` — iterate the dict directly.
+    DictKeysIter {
+        function_name: String,
+        pattern: String,
+    },
+
+    // ── Resource management (check 123) ──────────────────────────────────
+
+    /// Resource opened without context manager / RAII guard.
+    UnclosedResource {
+        function_name: String,
+        pattern: String,
+        suggestion: String,
+    },
+
+    // ── Python idioms (checks 124-128) ───────────────────────────────────
+
+    /// `for i in range(len(x))` → `for i, v in enumerate(x)`.
+    EnumerateVsRangeLen {
+        function_name: String,
+    },
+
+    /// `for x in iterable: yield x` → `yield from iterable`.
+    YieldFrom {
+        function_name: String,
+    },
+
+    /// `for x in items: result.append(x)` → `result.extend(items)`.
+    AppendInLoopExtend {
+        function_name: String,
+        variable_hint: String,
+    },
+
+    /// Nested `with` blocks that can be combined into one `with a, b:`.
+    DoubleWithStatement {
+        function_name: String,
+    },
+
+    /// `import` statement inside function body — moves import cost into every call.
+    ImportInFunction {
+        function_name: String,
+        module_name: String,
+    },
+
+    // ── Cross-language lint (checks 129-130) ─────────────────────────────
+
+    /// Constant condition: `if True`, `while false`, `if 1 {` — dead or infinite branch.
+    ConstantCondition {
+        function_name: String,
+        pattern: String,
+    },
+
+    /// Redundant negation: `if not x == y` → `if x != y`.
+    RedundantNegation {
+        function_name: String,
+        pattern: String,
+        suggestion: String,
+    },
+
+    // ── Checks 131-132 ──────────────────────────────────────────────────
+
+    /// Repeated `if key not in d: d[key] = default` → use `defaultdict` or `.setdefault()`.
+    DefaultDictPattern {
+        function_name: String,
+        pattern: String,
+    },
+
+    /// `if s == ""` / `if s != ""` → `if not s` / `if s` (Python) or `.is_empty()` (Rust).
+    EmptyStringCheck {
+        function_name: String,
+        pattern: String,
+        suggestion: String,
+    },
 }
 
 /// A single redundancy finding with tier, kind, involved nodes, and explanation.
@@ -741,6 +938,8 @@ pub struct AnalysisConfig {
     pub integration_test_module_threshold: usize,
     /// List of check names (or category module names) to skip.
     pub skip_checks: Vec<String>,
+    /// If set, only include findings from this category.
+    pub category: Option<String>,
 }
 
 impl Default for AnalysisConfig {
@@ -757,6 +956,164 @@ impl Default for AnalysisConfig {
             test_ratio_threshold: 0.30,
             integration_test_module_threshold: 4,
             skip_checks: Vec::new(),
+            category: None,
+        }
+    }
+}
+
+impl FindingKind {
+    /// Return the category name for this finding kind.
+    pub fn category(&self) -> &'static str {
+        match self {
+            FindingKind::Passthrough { .. }
+            | FindingKind::NearDuplicate { .. }
+            | FindingKind::StructurallySimilar { .. }
+            | FindingKind::MergeCandidate { .. }
+            | FindingKind::SplitCandidate { .. } => "redundancy",
+
+            FindingKind::OverlappingStructs { .. }
+            | FindingKind::OverlappingEnums { .. } => "struct_enum",
+
+            FindingKind::SuggestParameterStruct { .. }
+            | FindingKind::SuggestEnumDispatch { .. }
+            | FindingKind::SuggestTraitExtraction { .. } => "type_suggestions",
+
+            FindingKind::SuggestFacade { .. }
+            | FindingKind::SuggestFactory { .. }
+            | FindingKind::SuggestBuilder { .. }
+            | FindingKind::SuggestStrategy { .. }
+            | FindingKind::SuggestTemplateMethod { .. }
+            | FindingKind::SuggestObserver { .. }
+            | FindingKind::SuggestDecorator { .. }
+            | FindingKind::SuggestMediator { .. } => "design_patterns",
+
+            FindingKind::GodClass { .. }
+            | FindingKind::CircularDependency { .. }
+            | FindingKind::FeatureEnvy { .. }
+            | FindingKind::ShotgunSurgery { .. }
+            | FindingKind::DeadCode { .. }
+            | FindingKind::LongParameterList { .. }
+            | FindingKind::DataClump { .. }
+            | FindingKind::MiddleMan { .. }
+            | FindingKind::LazyClass { .. }
+            | FindingKind::RefusedBequest { .. }
+            | FindingKind::SpeculativeGenerality { .. }
+            | FindingKind::InappropriateIntimacy { .. }
+            | FindingKind::DeepNesting { .. }
+            | FindingKind::DivergentChange { .. }
+            | FindingKind::ParallelInheritance { .. }
+            | FindingKind::PrimitiveObsession { .. }
+            | FindingKind::LargeClass { .. }
+            | FindingKind::UnstableDependency { .. }
+            | FindingKind::AnemicDomainModel { .. }
+            | FindingKind::MagicNumber { .. }
+            | FindingKind::MutableGlobalState { .. }
+            | FindingKind::EmptyCatch { .. }
+            | FindingKind::CallbackHell { .. }
+            | FindingKind::ApiInconsistency { .. } => "anti_patterns",
+
+            FindingKind::DetectedSingleton { .. }
+            | FindingKind::DetectedAdapter { .. }
+            | FindingKind::DetectedProxy { .. }
+            | FindingKind::DetectedCommand { .. }
+            | FindingKind::DetectedChainOfResponsibility { .. }
+            | FindingKind::DetectedDependencyInjection { .. }
+            | FindingKind::DetectedVisitor { .. }
+            | FindingKind::DetectedIterator { .. }
+            | FindingKind::DetectedState { .. }
+            | FindingKind::DetectedComposite { .. }
+            | FindingKind::DetectedRepository { .. }
+            | FindingKind::DetectedPrototype { .. }
+            | FindingKind::DetectedFlyweight { .. }
+            | FindingKind::DetectedEventEmitter { .. }
+            | FindingKind::DetectedMemento { .. }
+            | FindingKind::DetectedFluentBuilder { .. }
+            | FindingKind::DetectedNullObject { .. } => "pattern_detection",
+
+            FindingKind::HubModule { .. }
+            | FindingKind::OrphanModule { .. }
+            | FindingKind::InconsistentNaming { .. }
+            | FindingKind::CircularPackageDependency { .. } => "structural",
+
+            FindingKind::SuggestSumType { .. }
+            | FindingKind::SuggestEnumFromHierarchy { .. }
+            | FindingKind::BooleanBlindness { .. }
+            | FindingKind::SuggestNewtype { .. }
+            | FindingKind::SuggestSealedType { .. }
+            | FindingKind::LargeProductType { .. } => "type_system",
+
+            FindingKind::LackOfCohesion { .. }
+            | FindingKind::HighCoupling { .. }
+            | FindingKind::ModuleInstability { .. }
+            | FindingKind::HighCognitiveComplexity { .. } => "metrics",
+
+            FindingKind::HighRiskFunction { .. }
+            | FindingKind::HighRiskFile { .. } => "risk",
+
+            FindingKind::UntestedPublicFunction { .. }
+            | FindingKind::LowTestRatio { .. }
+            | FindingKind::IntegrationTestSmell { .. } => "testing",
+
+            FindingKind::HighBlastRadius { .. }
+            | FindingKind::MisplacedFunction { .. }
+            | FindingKind::ImplicitModule { .. } => "blast_radius",
+
+            FindingKind::UnstablePublicApi { .. }
+            | FindingKind::UndocumentedPublicApi { .. }
+            | FindingKind::LeakyAbstraction { .. } => "api_surface",
+
+            FindingKind::FfiBoundary { .. }
+            | FindingKind::SubprocessCall { .. }
+            | FindingKind::IpcBoundary { .. } => "cross_language",
+
+            FindingKind::EnvVarUsage { .. }
+            | FindingKind::HardcodedEndpoint { .. }
+            | FindingKind::FeatureFlag { .. }
+            | FindingKind::ConfigFileUsage { .. } => "config_detection",
+
+            FindingKind::VecUsedAsSet { .. }
+            | FindingKind::VecUsedAsMap { .. }
+            | FindingKind::LinearSearchInLoop { .. }
+            | FindingKind::StringConcatInLoop { .. }
+            | FindingKind::SortedVecForLookup { .. }
+            | FindingKind::NestedLoopLookup { .. }
+            | FindingKind::HashMapWithSequentialKeys { .. }
+            | FindingKind::ExcessiveCollectIterate { .. } => "data_structures",
+
+            FindingKind::UnusedImport { .. }
+            | FindingKind::InconsistentErrorHandling { .. }
+            | FindingKind::TechDebtComment { .. } => "code_quality",
+
+            FindingKind::CloneInLoop { .. }
+            | FindingKind::RedundantCollectIterate { .. }
+            | FindingKind::RepeatedMapLookup { .. }
+            | FindingKind::VecNoPresize { .. }
+            | FindingKind::SortThenFind { .. }
+            | FindingKind::ListConcatInLoop { .. }
+            | FindingKind::UnboundedRecursion { .. }
+            | FindingKind::SuggestVectorize { .. }
+            | FindingKind::SuggestPolars { .. }
+            | FindingKind::RegexRecompileInLoop { .. }
+            | FindingKind::MemoizationCandidate { .. }
+            | FindingKind::ExceptionForControlFlow { .. }
+            | FindingKind::NPlusOneQuery { .. }
+            | FindingKind::SyncAsyncConflict { .. }
+            | FindingKind::RepeatedFormatInLoop { .. }
+            | FindingKind::SleepInLoop { .. }
+            | FindingKind::GeneratorOverList { .. }
+            | FindingKind::UnnecessaryChain { .. }
+            | FindingKind::LargeListIn { .. }
+            | FindingKind::DictKeysIter { .. }
+            | FindingKind::UnclosedResource { .. }
+            | FindingKind::EnumerateVsRangeLen { .. }
+            | FindingKind::YieldFrom { .. }
+            | FindingKind::AppendInLoopExtend { .. }
+            | FindingKind::DoubleWithStatement { .. }
+            | FindingKind::ImportInFunction { .. }
+            | FindingKind::ConstantCondition { .. }
+            | FindingKind::RedundantNegation { .. }
+            | FindingKind::DefaultDictPattern { .. }
+            | FindingKind::EmptyStringCheck { .. } => "optimization",
         }
     }
 }

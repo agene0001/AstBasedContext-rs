@@ -174,6 +174,13 @@ enum Commands {
         #[arg(long = "skip-check", value_delimiter = ',')]
         skip_checks: Vec<String>,
 
+        /// Filter to a specific category: redundancy, struct_enum, type_suggestions, design_patterns,
+        /// anti_patterns, pattern_detection, structural, type_system, metrics, risk, testing,
+        /// blast_radius, api_surface, cross_language, config_detection, data_structures,
+        /// code_quality, optimization
+        #[arg(long)]
+        category: Option<String>,
+
         /// Include full source code snippets in output (increases context significantly)
         #[arg(long)]
         include_source: bool,
@@ -564,6 +571,7 @@ fn main() {
             structural_threshold,
             merge_threshold,
             skip_checks,
+            category,
             include_source,
             limit_per_type,
         } => {
@@ -588,6 +596,7 @@ fn main() {
                 structural_threshold,
                 merge_threshold,
                 skip_checks,
+                category,
                 ..Default::default()
             };
 
@@ -727,6 +736,36 @@ fn main() {
                     FindingKind::UnusedImport { .. } => "UI=unused-import",
                     FindingKind::InconsistentErrorHandling { .. } => "IEH=inconsistent-error",
                     FindingKind::TechDebtComment { .. } => "TD=tech-debt",
+                    FindingKind::CloneInLoop { .. } => "CIL=clone-in-loop",
+                    FindingKind::RedundantCollectIterate { .. } => "RCI=redundant-collect",
+                    FindingKind::RepeatedMapLookup { .. } => "RML=repeated-lookup",
+                    FindingKind::VecNoPresize { .. } => "VNP=vec-no-presize",
+                    FindingKind::SortThenFind { .. } => "STF=sort-then-find",
+                    FindingKind::ListConcatInLoop { .. } => "LCO=list-concat-loop",
+                    FindingKind::UnboundedRecursion { .. } => "URB=unbounded-recursion",
+                    FindingKind::SuggestVectorize { .. } => "VEC=vectorize",
+                    FindingKind::SuggestPolars { .. } => "POL=suggest-polars",
+                    FindingKind::RegexRecompileInLoop { .. } => "RRC=regex-recompile",
+                    FindingKind::MemoizationCandidate { .. } => "MCM=memoize-candidate",
+                    FindingKind::ExceptionForControlFlow { .. } => "EFC=exception-control-flow",
+                    FindingKind::NPlusOneQuery { .. } => "N1Q=n-plus-one-query",
+                    FindingKind::SyncAsyncConflict { .. } => "SAC=sync-async-conflict",
+                    FindingKind::RepeatedFormatInLoop { .. } => "RFI=repeated-format-loop",
+                    FindingKind::SleepInLoop { .. } => "SLA=sleep-in-loop",
+                    FindingKind::GeneratorOverList { .. } => "GEN=generator-over-list",
+                    FindingKind::UnnecessaryChain { .. } => "UCH=unnecessary-chain",
+                    FindingKind::LargeListIn { .. } => "LLI=large-list-in",
+                    FindingKind::DictKeysIter { .. } => "DLK=dict-keys-iter",
+                    FindingKind::UnclosedResource { .. } => "UCM=unclosed-resource",
+                    FindingKind::EnumerateVsRangeLen { .. } => "ELV=enumerate-vs-range-len",
+                    FindingKind::YieldFrom { .. } => "YLD=yield-from",
+                    FindingKind::AppendInLoopExtend { .. } => "APD=append-loop-extend",
+                    FindingKind::DoubleWithStatement { .. } => "DWS=double-with",
+                    FindingKind::ImportInFunction { .. } => "IIF=import-in-function",
+                    FindingKind::ConstantCondition { .. } => "CST=constant-condition",
+                    FindingKind::RedundantNegation { .. } => "RNE=redundant-negation",
+                    FindingKind::DefaultDictPattern { .. } => "DFC=default-dict-pattern",
+                    FindingKind::EmptyStringCheck { .. } => "ESE=empty-string-check",
                 }).collect();
                 println!("Tiers: C=critical H=high M=medium L=low");
                 println!("Codes: {}\n", used.into_iter().collect::<Vec<_>>().join(" "));
@@ -837,6 +876,36 @@ fn main() {
                     FindingKind::UnusedImport { .. } => "UI",
                     FindingKind::InconsistentErrorHandling { .. } => "IEH",
                     FindingKind::TechDebtComment { .. } => "TD",
+                    FindingKind::CloneInLoop { .. } => "CIL",
+                    FindingKind::RedundantCollectIterate { .. } => "RCI",
+                    FindingKind::RepeatedMapLookup { .. } => "RML",
+                    FindingKind::VecNoPresize { .. } => "VNP",
+                    FindingKind::SortThenFind { .. } => "STF",
+                    FindingKind::ListConcatInLoop { .. } => "LCO",
+                    FindingKind::UnboundedRecursion { .. } => "URB",
+                    FindingKind::SuggestVectorize { .. } => "VEC",
+                    FindingKind::SuggestPolars { .. } => "POL",
+                    FindingKind::RegexRecompileInLoop { .. } => "RRC",
+                    FindingKind::MemoizationCandidate { .. } => "MCM",
+                    FindingKind::ExceptionForControlFlow { .. } => "EFC",
+                    FindingKind::NPlusOneQuery { .. } => "N1Q",
+                    FindingKind::SyncAsyncConflict { .. } => "SAC",
+                    FindingKind::RepeatedFormatInLoop { .. } => "RFI",
+                    FindingKind::SleepInLoop { .. } => "SLA",
+                    FindingKind::GeneratorOverList { .. } => "GEN",
+                    FindingKind::UnnecessaryChain { .. } => "UCH",
+                    FindingKind::LargeListIn { .. } => "LLI",
+                    FindingKind::DictKeysIter { .. } => "DLK",
+                    FindingKind::UnclosedResource { .. } => "UCM",
+                    FindingKind::EnumerateVsRangeLen { .. } => "ELV",
+                    FindingKind::YieldFrom { .. } => "YLD",
+                    FindingKind::AppendInLoopExtend { .. } => "APD",
+                    FindingKind::DoubleWithStatement { .. } => "DWS",
+                    FindingKind::ImportInFunction { .. } => "IIF",
+                    FindingKind::ConstantCondition { .. } => "CST",
+                    FindingKind::RedundantNegation { .. } => "RNE",
+                    FindingKind::DefaultDictPattern { .. } => "DFC",
+                    FindingKind::EmptyStringCheck { .. } => "ESE",
                 };
 
                 let tier_flag = match finding.tier {

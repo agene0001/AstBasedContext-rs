@@ -13,3 +13,4 @@ pub mod billing_service;
 pub mod shipping_service;
 pub mod notification_service;
 pub mod orchestrator;
+pub mod optimization_patterns;

@@ -1,9 +1,9 @@
 //! Tiered redundancy and architecture analysis for code graphs.
 //!
-//! Produces a ranked list of findings from Critical → Low across 102 checks spanning
+//! Produces a ranked list of findings from Critical → Low across 132 checks spanning
 //! function redundancy, struct/enum overlap, design patterns, anti-patterns, type system,
 //! metrics, risk scores, test coverage, blast radius, API surface, cross-language boundaries,
-//! configuration detection, and data structure usage suggestions.
+//! configuration detection, data structure usage, and optimization suggestions.
 //!
 //! Requires `--annotate` for source-level checks.
 
@@ -21,6 +21,7 @@ mod data_structures;
 mod design_patterns;
 mod function_checks;
 mod metrics;
+mod optimization;
 mod pattern_detection;
 mod risk;
 mod struct_enum;
@@ -593,6 +594,163 @@ pub fn analyze(graph: &CodeGraph, config: &AnalysisConfig) -> Vec<Finding> {
     // ── Check 102: Tech debt comments (Medium / Low) ───────────────────
     if !skip("code_quality") && !skip("detect_tech_debt_comments") {
         code_quality::detect_tech_debt_comments(&ctx, &mut findings);
+    }
+
+    // ── Optimization Suggestions ──────────────────────────────────────
+
+    // ── Check 103: Clone/allocation in loop (Medium) ──────────────────
+    if !skip("optimization") && !skip("detect_clone_in_loop") {
+        optimization::detect_clone_in_loop(&ctx, &mut findings);
+    }
+
+    // ── Check 104: Redundant collect then iterate (Medium) ────────────
+    if !skip("optimization") && !skip("detect_redundant_collect_iterate") {
+        optimization::detect_redundant_collect_iterate(&ctx, &mut findings);
+    }
+
+    // ── Check 105: Repeated map lookup (Low) ──────────────────────────
+    if !skip("optimization") && !skip("detect_repeated_map_lookup") {
+        optimization::detect_repeated_map_lookup(&ctx, &mut findings);
+    }
+
+    // ── Check 106: Vec/list without pre-sizing (Low) ──────────────────
+    if !skip("optimization") && !skip("detect_vec_no_presize") {
+        optimization::detect_vec_no_presize(&ctx, &mut findings);
+    }
+
+    // ── Check 107: Sort then linear find (Medium) ─────────────────────
+    if !skip("optimization") && !skip("detect_sort_then_find") {
+        optimization::detect_sort_then_find(&ctx, &mut findings);
+    }
+
+    // ── Check 108: List concat in loop (Medium) ───────────────────────
+    if !skip("optimization") && !skip("detect_list_concat_in_loop") {
+        optimization::detect_list_concat_in_loop(&ctx, &mut findings);
+    }
+
+    // ── Check 109: Unbounded recursion (Low) ──────────────────────────
+    if !skip("optimization") && !skip("detect_unbounded_recursion") {
+        optimization::detect_unbounded_recursion(&ctx, &mut findings);
+    }
+
+    // ── Check 110: SIMD / vectorization candidate (Low) ──────────────
+    if !skip("optimization") && !skip("detect_vectorization_candidate") {
+        optimization::detect_vectorization_candidate(&ctx, &mut findings);
+    }
+
+    // ── Check 111: Suggest Polars over Pandas (Medium / Low) ─────────
+    if !skip("optimization") && !skip("detect_suggest_polars") {
+        optimization::detect_suggest_polars(&ctx, &mut findings);
+    }
+
+    // ── Check 112: Regex recompile in loop (Medium) ───────────────────
+    if !skip("optimization") && !skip("detect_regex_recompile_in_loop") {
+        optimization::detect_regex_recompile_in_loop(&ctx, &mut findings);
+    }
+
+    // ── Check 113: Memoization candidate (Low) ──────────────────────
+    if !skip("optimization") && !skip("detect_memoization_candidate") {
+        optimization::detect_memoization_candidate(&ctx, &mut findings);
+    }
+
+    // ── Check 114: Exception for control flow (Medium) ──────────────
+    if !skip("optimization") && !skip("detect_exception_for_control_flow") {
+        optimization::detect_exception_for_control_flow(&ctx, &mut findings);
+    }
+
+    // ── Check 115: N+1 query (High) ─────────────────────────────────
+    if !skip("optimization") && !skip("detect_n_plus_one_query") {
+        optimization::detect_n_plus_one_query(&ctx, &mut findings);
+    }
+
+    // ── Check 116: Sync/async conflict (High) ───────────────────────
+    if !skip("optimization") && !skip("detect_sync_async_conflict") {
+        optimization::detect_sync_async_conflict(&ctx, &mut findings);
+    }
+
+    // ── Check 117: Repeated format in loop (Low) ────────────────────
+    if !skip("optimization") && !skip("detect_repeated_format_in_loop") {
+        optimization::detect_repeated_format_in_loop(&ctx, &mut findings);
+    }
+
+    // ── Check 118: Sleep in loop (Medium) ─────────────────────────────
+    if !skip("optimization") && !skip("detect_sleep_in_loop") {
+        optimization::detect_sleep_in_loop(&ctx, &mut findings);
+    }
+
+    // ── Check 119: Generator over list (Low) ────────────────────────
+    if !skip("optimization") && !skip("detect_generator_over_list") {
+        optimization::detect_generator_over_list(&ctx, &mut findings);
+    }
+
+    // ── Check 120: Unnecessary iterator chain (Low) ─────────────────
+    if !skip("optimization") && !skip("detect_unnecessary_chain") {
+        optimization::detect_unnecessary_chain(&ctx, &mut findings);
+    }
+
+    // ── Check 121: Large list membership test (Medium) ──────────────
+    if !skip("optimization") && !skip("detect_large_list_in") {
+        optimization::detect_large_list_in(&ctx, &mut findings);
+    }
+
+    // ── Check 122: Dict keys iteration (Low) ────────────────────────
+    if !skip("optimization") && !skip("detect_dict_keys_iter") {
+        optimization::detect_dict_keys_iter(&ctx, &mut findings);
+    }
+
+    // ── Check 123: Unclosed resource (High) ─────────────────────────
+    if !skip("optimization") && !skip("detect_unclosed_resource") {
+        optimization::detect_unclosed_resource(&ctx, &mut findings);
+    }
+
+    // ── Check 124: Enumerate vs range(len()) (Low) ───────────────────
+    if !skip("optimization") && !skip("detect_enumerate_vs_range_len") {
+        optimization::detect_enumerate_vs_range_len(&ctx, &mut findings);
+    }
+
+    // ── Check 125: yield from (Low) ─────────────────────────────────
+    if !skip("optimization") && !skip("detect_yield_from") {
+        optimization::detect_yield_from(&ctx, &mut findings);
+    }
+
+    // ── Check 126: Append in loop → extend (Low) ────────────────────
+    if !skip("optimization") && !skip("detect_append_in_loop_extend") {
+        optimization::detect_append_in_loop_extend(&ctx, &mut findings);
+    }
+
+    // ── Check 127: Double with statement (Low) ──────────────────────
+    if !skip("optimization") && !skip("detect_double_with_statement") {
+        optimization::detect_double_with_statement(&ctx, &mut findings);
+    }
+
+    // ── Check 128: Import in function (Low) ─────────────────────────
+    if !skip("optimization") && !skip("detect_import_in_function") {
+        optimization::detect_import_in_function(&ctx, &mut findings);
+    }
+
+    // ── Check 129: Constant condition (Medium) ──────────────────────
+    if !skip("optimization") && !skip("detect_constant_condition") {
+        optimization::detect_constant_condition(&ctx, &mut findings);
+    }
+
+    // ── Check 130: Redundant negation (Low) ─────────────────────────
+    if !skip("optimization") && !skip("detect_redundant_negation") {
+        optimization::detect_redundant_negation(&ctx, &mut findings);
+    }
+
+    // ── Check 131: Default dict pattern (Low) ─────────────────────────
+    if !skip("optimization") && !skip("detect_default_dict_pattern") {
+        optimization::detect_default_dict_pattern(&ctx, &mut findings);
+    }
+
+    // ── Check 132: Empty string check (Low) ─────────────────────────
+    if !skip("optimization") && !skip("detect_empty_string_check") {
+        optimization::detect_empty_string_check(&ctx, &mut findings);
+    }
+
+    // Filter by category if specified
+    if let Some(ref cat) = config.category {
+        findings.retain(|f| f.kind.category() == cat.as_str());
     }
 
     // Sort: Critical first, then High, Medium, Low

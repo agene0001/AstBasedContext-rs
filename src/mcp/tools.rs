@@ -257,6 +257,15 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                         "type": "boolean",
                         "description": "Include full source code snippets in output. Significantly increases context usage. (default: false)"
                     },
+                    "category": {
+                        "type": "string",
+                        "description": "Filter findings to a specific category",
+                        "enum": ["redundancy", "struct_enum", "type_suggestions", "design_patterns",
+                                 "anti_patterns", "pattern_detection", "structural", "type_system",
+                                 "metrics", "risk", "testing", "blast_radius", "api_surface",
+                                 "cross_language", "config_detection", "data_structures",
+                                 "code_quality", "optimization"]
+                    },
                     "limit_per_type": {
                         "type": "integer",
                         "description": "Maximum number of findings to return per redundancy type (default: 5, 0 = all)"
@@ -1108,6 +1117,10 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         .get("limit")
         .and_then(|v| v.as_u64())
         .map(|v| v as usize);
+    let category = args
+        .get("category")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let repo = args.get("repository").and_then(|v| v.as_str());
 
     with_graph(state, repo, |graph| {
@@ -1125,6 +1138,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         let mut config = AnalysisConfig {
             min_lines,
             skip_checks,
+            category,
             ..Default::default()
         };
         if let Some(v) = near_dup {
@@ -1304,6 +1318,36 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                 FindingKind::UnusedImport { .. } => "UI=unused-import",
                 FindingKind::InconsistentErrorHandling { .. } => "IEH=inconsistent-error",
                 FindingKind::TechDebtComment { .. } => "TD=tech-debt",
+                FindingKind::CloneInLoop { .. } => "CIL=clone-in-loop",
+                FindingKind::RedundantCollectIterate { .. } => "RCI=redundant-collect",
+                FindingKind::RepeatedMapLookup { .. } => "RML=repeated-lookup",
+                FindingKind::VecNoPresize { .. } => "VNP=vec-no-presize",
+                FindingKind::SortThenFind { .. } => "STF=sort-then-find",
+                FindingKind::ListConcatInLoop { .. } => "LCO=list-concat-loop",
+                FindingKind::UnboundedRecursion { .. } => "URB=unbounded-recursion",
+                FindingKind::SuggestVectorize { .. } => "VEC=vectorize",
+                FindingKind::SuggestPolars { .. } => "POL=suggest-polars",
+                FindingKind::RegexRecompileInLoop { .. } => "RRC=regex-recompile",
+                FindingKind::MemoizationCandidate { .. } => "MCM=memoize-candidate",
+                FindingKind::ExceptionForControlFlow { .. } => "EFC=exception-control-flow",
+                FindingKind::NPlusOneQuery { .. } => "N1Q=n-plus-one-query",
+                FindingKind::SyncAsyncConflict { .. } => "SAC=sync-async-conflict",
+                FindingKind::RepeatedFormatInLoop { .. } => "RFI=repeated-format-loop",
+                FindingKind::SleepInLoop { .. } => "SLA=sleep-in-loop",
+                FindingKind::GeneratorOverList { .. } => "GEN=generator-over-list",
+                FindingKind::UnnecessaryChain { .. } => "UCH=unnecessary-chain",
+                FindingKind::LargeListIn { .. } => "LLI=large-list-in",
+                FindingKind::DictKeysIter { .. } => "DLK=dict-keys-iter",
+                FindingKind::UnclosedResource { .. } => "UCM=unclosed-resource",
+                FindingKind::EnumerateVsRangeLen { .. } => "ELV=enumerate-vs-range-len",
+                FindingKind::YieldFrom { .. } => "YLD=yield-from",
+                FindingKind::AppendInLoopExtend { .. } => "APD=append-loop-extend",
+                FindingKind::DoubleWithStatement { .. } => "DWS=double-with",
+                FindingKind::ImportInFunction { .. } => "IIF=import-in-function",
+                FindingKind::ConstantCondition { .. } => "CST=constant-condition",
+                FindingKind::RedundantNegation { .. } => "RNE=redundant-negation",
+                FindingKind::DefaultDictPattern { .. } => "DFC=default-dict-pattern",
+                FindingKind::EmptyStringCheck { .. } => "ESE=empty-string-check",
             }).collect();
             text.push_str("Tiers: C=critical H=high M=medium L=low\nCodes: ");
             text.push_str(&used_tags.into_iter().collect::<Vec<_>>().join(" "));
@@ -1414,6 +1458,36 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                 FindingKind::UnusedImport { .. } => "UI",
                 FindingKind::InconsistentErrorHandling { .. } => "IEH",
                 FindingKind::TechDebtComment { .. } => "TD",
+                FindingKind::CloneInLoop { .. } => "CIL",
+                FindingKind::RedundantCollectIterate { .. } => "RCI",
+                FindingKind::RepeatedMapLookup { .. } => "RML",
+                FindingKind::VecNoPresize { .. } => "VNP",
+                FindingKind::SortThenFind { .. } => "STF",
+                FindingKind::ListConcatInLoop { .. } => "LCO",
+                FindingKind::UnboundedRecursion { .. } => "URB",
+                FindingKind::SuggestVectorize { .. } => "VEC",
+                FindingKind::SuggestPolars { .. } => "POL",
+                FindingKind::RegexRecompileInLoop { .. } => "RRC",
+                FindingKind::MemoizationCandidate { .. } => "MCM",
+                FindingKind::ExceptionForControlFlow { .. } => "EFC",
+                FindingKind::NPlusOneQuery { .. } => "N1Q",
+                FindingKind::SyncAsyncConflict { .. } => "SAC",
+                FindingKind::RepeatedFormatInLoop { .. } => "RFI",
+                FindingKind::SleepInLoop { .. } => "SLA",
+                FindingKind::GeneratorOverList { .. } => "GEN",
+                FindingKind::UnnecessaryChain { .. } => "UCH",
+                FindingKind::LargeListIn { .. } => "LLI",
+                FindingKind::DictKeysIter { .. } => "DLK",
+                FindingKind::UnclosedResource { .. } => "UCM",
+                FindingKind::EnumerateVsRangeLen { .. } => "ELV",
+                FindingKind::YieldFrom { .. } => "YLD",
+                FindingKind::AppendInLoopExtend { .. } => "APD",
+                FindingKind::DoubleWithStatement { .. } => "DWS",
+                FindingKind::ImportInFunction { .. } => "IIF",
+                FindingKind::ConstantCondition { .. } => "CST",
+                FindingKind::RedundantNegation { .. } => "RNE",
+                FindingKind::DefaultDictPattern { .. } => "DFC",
+                FindingKind::EmptyStringCheck { .. } => "ESE",
             };
 
             let tier_flag = match finding.tier {
