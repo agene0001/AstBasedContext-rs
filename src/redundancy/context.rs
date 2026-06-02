@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use petgraph::graph::NodeIndex;
 
+use crate::graph::structural;
 use crate::graph::CodeGraph;
 use crate::types::node::GraphNode;
 use crate::types::EdgeKind;
@@ -38,6 +39,12 @@ pub(crate) struct AnalysisContext<'a> {
     // ── Tests ──────────────────────────────────────────────────────────
     pub has_test: HashSet<NodeIndex>,
 
+    // ── Structural fingerprints (for false-positive reduction) ─────────
+    /// AST-shape fingerprint per function node (only for annotated graphs).
+    pub fn_fingerprints: HashMap<NodeIndex, structural::Fingerprint>,
+    /// IDF weights over the function-fingerprint corpus, so ubiquitous grammar
+    /// productions don't inflate structural similarity.
+    pub fn_idf: HashMap<u64, f64>,
 }
 
 #[allow(dead_code)]
@@ -107,6 +114,18 @@ impl<'a> AnalysisContext<'a> {
             }
         }
 
+        // Load structural fingerprints for functions (annotated graphs only) and
+        // compute IDF weights over them. Used to confirm lexical similarity
+        // findings against actual AST shape, cutting false positives.
+        let mut fn_fingerprints: HashMap<NodeIndex, structural::Fingerprint> = HashMap::new();
+        for &(idx, _) in &functions {
+            if let Some(pairs) = graph.fingerprint_pairs(idx) {
+                fn_fingerprints.insert(idx, structural::pairs_to_map(pairs));
+            }
+        }
+        let corpus: Vec<&structural::Fingerprint> = fn_fingerprints.values().collect();
+        let fn_idf = structural::idf_weights(&corpus);
+
         Self {
             graph,
             config,
@@ -126,7 +145,19 @@ impl<'a> AnalysisContext<'a> {
             subclasses,
             implementors,
             has_test,
+            fn_fingerprints,
+            fn_idf,
         }
+    }
+
+    /// IDF-weighted structural (AST-shape) cosine similarity between two function
+    /// nodes, in `[0.0, 1.0]`. Returns `None` when either node has no stored
+    /// fingerprint (e.g. a graph built before fingerprints existed), so callers
+    /// can fall back to their lexical decision rather than dropping a finding.
+    pub fn structural_cosine(&self, a: NodeIndex, b: NodeIndex) -> Option<f64> {
+        let fa = self.fn_fingerprints.get(&a)?;
+        let fb = self.fn_fingerprints.get(&b)?;
+        Some(structural::weighted_cosine(fa, fb, &self.fn_idf))
     }
 
     // ── Convenience accessors ──────────────────────────────────────────

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Language as TsLanguage, Node, Parser, Query, QueryCursor};
+use tree_sitter::{Language as TsLanguage, Node, Query, QueryCursor};
 
 use crate::error::{Error, Result};
 use crate::types::node::*;
@@ -98,14 +98,6 @@ impl CParser {
             ts_language,
             queries,
         }
-    }
-
-    fn make_parser(&self) -> Parser {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&self.ts_language)
-            .expect("C language must load");
-        parser
     }
 
     fn find_functions(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<FunctionData> {
@@ -266,15 +258,7 @@ impl CParser {
     fn find_imports(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<ImportData> {
         let mut imports = Vec::new();
         let mut seen = HashSet::new();
-        let Some(path_idx) = self.queries.imports.capture_index_for_name("path") else { return imports; };
-
-        let mut matches = cursor.matches(&self.queries.imports, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != path_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.imports, "path", *root, source, |node| {
                 let raw = get_node_text(&node, source).to_string();
 
                 // Strip quotes / angle brackets
@@ -283,7 +267,7 @@ impl CParser {
                     .to_string();
 
                 if seen.contains(&clean) {
-                    continue;
+                    return;
                 }
                 seen.insert(clean.clone());
 
@@ -301,25 +285,16 @@ impl CParser {
                     language: Language::C,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         imports
     }
 
     fn find_calls(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<FunctionCallData> {
         let mut calls = Vec::new();
-        let Some(name_idx) = self.queries.calls.capture_index_for_name("name") else { return calls; };
-
-        let mut matches = cursor.matches(&self.queries.calls, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.calls, "name", *root, source, |node| {
                 let name = get_node_text(&node, source).to_string();
 
-                let Some(call_node) = node.parent() else { continue; };
+                let Some(call_node) = node.parent() else { return; };
                 let args = extract_c_call_args(&call_node, source);
 
                 let ctx = get_parent_context(
@@ -337,22 +312,13 @@ impl CParser {
                     context: ctx,
                     language: Language::C,
                 });
-            }
-        }
+        });
         calls
     }
 
     fn find_variables(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<VariableData> {
         let mut variables = Vec::new();
-        let Some(name_idx) = self.queries.variables.capture_index_for_name("name") else { return variables; };
-
-        let mut matches = cursor.matches(&self.queries.variables, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.variables, "name", *root, source, |node| {
                 let name = get_node_text(&node, source).to_string();
 
                 // Try to get the value from init_declarator
@@ -386,22 +352,13 @@ impl CParser {
                     language: Language::C,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         variables
     }
 
     fn find_macros(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<MacroData> {
         let mut macros = Vec::new();
-        let Some(name_idx) = self.queries.macros.capture_index_for_name("name") else { return macros; };
-
-        let mut matches = cursor.matches(&self.queries.macros, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.macros, "name", *root, source, |node| {
                 let name = get_node_text(&node, source).to_string();
 
                 macros.push(MacroData {
@@ -412,8 +369,7 @@ impl CParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         macros
     }
 }
@@ -424,7 +380,7 @@ impl LanguageParser for CParser {
     }
 
     fn parse(&self, path: &Path, source: &[u8], is_dependency: bool) -> Result<FileParseResult> {
-        let mut parser = self.make_parser();
+        let mut parser = build_parser(&self.ts_language);
         let tree = parser.parse(source, None).ok_or_else(|| Error::Parse {
             path: path.to_path_buf(),
             message: "tree-sitter failed to parse".into(),

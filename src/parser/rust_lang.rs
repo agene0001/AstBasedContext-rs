@@ -51,6 +51,10 @@ const Q_CALLS: &str = r#"
 const Q_VARIABLES: &str = r#"
     (let_declaration
         pattern: (identifier) @name)
+    (const_item
+        name: (identifier) @name)
+    (static_item
+        name: (identifier) @name)
 "#;
 
 /// Complexity-contributing node types for Rust.
@@ -114,28 +118,12 @@ impl RustParser {
         }
     }
 
-    fn make_parser(&self) -> Parser {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&self.ts_language)
-            .expect("Rust language must load");
-        parser
-    }
-
     // ── extraction helpers ───────────────────────────────────────────────
 
     fn find_functions(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<FunctionData> {
         let mut functions = Vec::new();
-        let Some(name_idx) = self.queries.functions.capture_index_for_name("name") else { return functions; };
-
-        let mut matches = cursor.matches(&self.queries.functions, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(func_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.functions, "name", *root, source, |node| {
+                let Some(func_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 let params_node = func_node.child_by_field_name("parameters");
@@ -229,26 +217,29 @@ impl RustParser {
                     source: None,
                     docstring: None,
                 });
-            }
-        }
+        });
         functions
     }
 
     fn find_structs(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<StructData> {
         let mut structs = Vec::new();
-        let Some(name_idx) = self.queries.structs.capture_index_for_name("name") else { return structs; };
-
-        let mut matches = cursor.matches(&self.queries.structs, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(struct_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.structs, "name", *root, source, |node| {
+                let Some(struct_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
-                let fields = extract_struct_fields(&struct_node, source);
+                let mut fields = extract_struct_fields(&struct_node, source);
+                // Fill in default values from any `impl Default for <name>` block,
+                // so queries can answer "what's the default for field X".
+                let defaults = extract_default_values(root, source, &name);
+                if !defaults.is_empty() {
+                    for f in &mut fields {
+                        if f.default_value.is_none()
+                            && let Some(v) = defaults.get(&f.name)
+                        {
+                            f.default_value = Some(v.clone());
+                        }
+                    }
+                }
 
                 structs.push(StructData {
                     name,
@@ -264,23 +255,14 @@ impl RustParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         structs
     }
 
     fn find_enums(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<EnumData> {
         let mut enums = Vec::new();
-        let Some(name_idx) = self.queries.enums.capture_index_for_name("name") else { return enums; };
-
-        let mut matches = cursor.matches(&self.queries.enums, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(enum_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.enums, "name", *root, source, |node| {
+                let Some(enum_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 // Extract variant names from the enum body
@@ -300,23 +282,14 @@ impl RustParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         enums
     }
 
     fn find_traits(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<TraitData> {
         let mut traits = Vec::new();
-        let Some(name_idx) = self.queries.traits.capture_index_for_name("name") else { return traits; };
-
-        let mut matches = cursor.matches(&self.queries.traits, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(trait_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.traits, "name", *root, source, |node| {
+                let Some(trait_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 traits.push(TraitData {
@@ -332,23 +305,14 @@ impl RustParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         traits
     }
 
     fn find_imports(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<ImportData> {
         let mut imports = Vec::new();
         let mut seen = HashSet::new();
-        let Some(import_idx) = self.queries.imports.capture_index_for_name("import") else { return imports; };
-
-        let mut matches = cursor.matches(&self.queries.imports, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != import_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.imports, "import", *root, source, |node| {
                 let text = get_node_text(&node, source).to_string();
 
                 // Strip "use " prefix and trailing ";"
@@ -361,7 +325,7 @@ impl RustParser {
                     .to_string();
 
                 if seen.contains(&import_path) {
-                    continue;
+                    return;
                 }
                 seen.insert(import_path.clone());
 
@@ -380,32 +344,23 @@ impl RustParser {
                     language: Language::Rust,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         imports
     }
 
     fn find_calls(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<FunctionCallData> {
         let mut calls = Vec::new();
-        let Some(name_idx) = self.queries.calls.capture_index_for_name("name") else { return calls; };
-
-        let mut matches = cursor.matches(&self.queries.calls, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.calls, "name", *root, source, |node| {
 
                 // Walk up to the call_expression node
                 let call_node = {
-                    let Some(mut p) = node.parent() else { continue; };
+                    let Some(mut p) = node.parent() else { return; };
                     while p.kind() != "call_expression" {
                         p = match p.parent() { Some(pp) => pp, None => break };
                     }
                     p
                 };
-                let Some(func_node) = call_node.child_by_field_name("function") else { continue; };
+                let Some(func_node) = call_node.child_by_field_name("function") else { return; };
 
                 let args = extract_rust_call_args(&call_node, source);
                 let ctx = get_parent_context(
@@ -423,23 +378,14 @@ impl RustParser {
                     context: ctx,
                     language: Language::Rust,
                 });
-            }
-        }
+        });
         calls
     }
 
     fn find_variables(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<VariableData> {
         let mut variables = Vec::new();
-        let Some(name_idx) = self.queries.variables.capture_index_for_name("name") else { return variables; };
-
-        let mut matches = cursor.matches(&self.queries.variables, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(let_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.variables, "name", *root, source, |node| {
+                let Some(let_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 let value = let_node
@@ -467,8 +413,7 @@ impl RustParser {
                     language: Language::Rust,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         variables
     }
 }
@@ -479,7 +424,7 @@ impl LanguageParser for RustParser {
     }
 
     fn parse(&self, path: &Path, source: &[u8], is_dependency: bool) -> Result<FileParseResult> {
-        let mut parser = self.make_parser();
+        let mut parser = build_parser(&self.ts_language);
         let tree = parser.parse(source, None).ok_or_else(|| Error::Parse {
             path: path.to_path_buf(),
             message: "tree-sitter failed to parse".into(),
@@ -634,6 +579,59 @@ fn has_visibility_modifier(node: &Node) -> bool {
     false
 }
 
+/// Map `field name → default value literal` parsed from `impl Default for <struct_name>`.
+fn extract_default_values(
+    root: &Node,
+    source: &[u8],
+    struct_name: &str,
+) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let mut stack = vec![*root];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "impl_item" {
+            let is_default = n
+                .child_by_field_name("trait")
+                .is_some_and(|t| get_node_text(&t, source) == "Default");
+            let is_target = n
+                .child_by_field_name("type")
+                .is_some_and(|t| get_node_text(&t, source) == struct_name);
+            if is_default && is_target {
+                collect_field_initializers(&n, source, &mut out);
+                continue; // no need to descend further into this impl
+            }
+        }
+        let mut c = n.walk();
+        for child in n.children(&mut c) {
+            stack.push(child);
+        }
+    }
+    out
+}
+
+/// Collect `field: value` initializers (e.g. inside a `Self { ... }` expression).
+fn collect_field_initializers(
+    node: &Node,
+    source: &[u8],
+    out: &mut std::collections::HashMap<String, String>,
+) {
+    let mut stack = vec![*node];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "field_initializer"
+            && let (Some(f), Some(v)) =
+                (n.child_by_field_name("field"), n.child_by_field_name("value"))
+        {
+            out.insert(
+                get_node_text(&f, source).to_string(),
+                get_node_text(&v, source).trim().to_string(),
+            );
+        }
+        let mut c = n.walk();
+        for child in n.children(&mut c) {
+            stack.push(child);
+        }
+    }
+}
+
 /// Extract field declarations from a Rust struct body.
 fn extract_struct_fields(struct_node: &Node, source: &[u8]) -> Vec<FieldDecl> {
     let mut fields = Vec::new();
@@ -664,6 +662,7 @@ fn extract_struct_fields(struct_node: &Node, source: &[u8]) -> Vec<FieldDecl> {
                 type_annotation,
                 visibility,
                 is_static: false,
+                default_value: None,
             });
         }
         if !cursor.goto_next_sibling() {

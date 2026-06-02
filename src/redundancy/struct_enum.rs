@@ -77,7 +77,8 @@ pub(super) fn find_overlapping_structs(
             for &gi in &group[1..] {
                 common.retain(|f| structs[gi].2.contains(f));
             }
-            let shared_fields: Vec<String> = common.into_iter().collect();
+            let mut shared_fields: Vec<String> = common.into_iter().collect();
+            shared_fields.sort(); // deterministic order (HashSet iteration is randomized)
             let names: Vec<String> = group.iter().map(|&g| structs[g].1.to_string()).collect();
             let indices: Vec<usize> = group.iter().map(|&g| structs[g].0.index()).collect();
 
@@ -162,7 +163,8 @@ pub(super) fn find_overlapping_enums(
             for &gi in &group[1..] {
                 common.retain(|v| enums[gi].2.contains(v));
             }
-            let shared_variants: Vec<String> = common.iter().map(|s| s.to_string()).collect();
+            let mut shared_variants: Vec<String> = common.iter().map(|s| s.to_string()).collect();
+            shared_variants.sort(); // HashSet order is randomized — sort for determinism
             let names: Vec<String> = group.iter().map(|&g| enums[g].1.to_string()).collect();
             let indices: Vec<usize> = group.iter().map(|&g| enums[g].0.index()).collect();
 

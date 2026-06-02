@@ -72,13 +72,18 @@ pub fn list_tools() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "find_code".to_string(),
-            description: "Search for functions, classes, or other code elements by name".to_string(),
+            description: "BROWSE/discover code elements by NAME (functions, classes, structs, enums, \
+                constants, fields): pass an identifier or partial identifier (not a phrase or value), \
+                or omit query + give kind to LIST all of a kind. Use it to find what exists or what's \
+                named. If you already know (even roughly) the symbol you want to READ, skip this and \
+                call get_context_for_symbol directly — it also takes a partial name and won't need a \
+                find_code first.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query (name or partial name)"
+                        "description": "A symbol name or partial name (an identifier, NOT free text or a value). Omit it (with a `kind`) to list ALL symbols of that kind."
                     },
                     "kind": {
                         "type": "string",
@@ -89,19 +94,20 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                         "type": "string",
                         "description": "Path of the indexed repository to query (optional — defaults to the first indexed repo)"
                     }
-                },
-                "required": ["query"]
+                }
             }),
         },
         ToolDefinition {
-            name: "get_file_summary".to_string(),
-            description: "List all symbols (functions, classes, structs, etc.) defined in a specific file.".to_string(),
+            name: "get_overview".to_string(),
+            description: "Overview of a path. Pass a FILE path (e.g. 'src/parser/python.rs') to list \
+                its symbols, or a DIRECTORY path (e.g. 'src/parser') for a module summary — files, \
+                symbol counts, lines, most complex functions, and cross-file dependencies.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the source file (absolute or partial — e.g. 'src/parser/python.rs')"
+                        "description": "A file path (lists its symbols) or directory path (module summary)"
                     },
                     "repository": {
                         "type": "string",
@@ -112,77 +118,23 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "analyze_relationships".to_string(),
-            description: "Analyze code relationships: callers, callees, inheritance, call chains"
-                .to_string(),
+            name: "get_repo_map".to_string(),
+            description: "Map the whole codebase: the most important symbols (PageRank-ranked by \
+                call/inherit/implement edges) as signature skeletons grouped by file, up to a token \
+                budget. Use ONLY for broad 'what is this codebase / where do I start / what are the \
+                core pieces' questions. Do NOT use it to find or understand a specific symbol (use \
+                find_code or get_context_for_symbol) or to inspect one file (use get_overview) — for \
+                anything narrower than the whole repo it is wasted tokens.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Name of the function or class to analyze"
-                    },
-                    "relationship": {
-                        "type": "string",
-                        "description": "Type of relationship to analyze",
-                        "enum": ["callers", "callees", "inheritance", "call_chain", "implementors", "children"]
-                    },
-                    "max_depth": {
+                    "budget": {
                         "type": "integer",
-                        "description": "Maximum depth for call chain analysis (default: 5)"
+                        "description": "Approx token budget for the map (default 1500)"
                     },
                     "repository": {
                         "type": "string",
                         "description": "Path of the indexed repository to query (optional)"
-                    }
-                },
-                "required": ["name", "relationship"]
-            }),
-        },
-        ToolDefinition {
-            name: "find_dead_code".to_string(),
-            description: "Find functions that are never called (dead code candidates)".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of results (default: 50)"
-                    },
-                    "repository": {
-                        "type": "string",
-                        "description": "Path of the indexed repository to query (optional)"
-                    }
-                }
-            }),
-        },
-        ToolDefinition {
-            name: "find_complex_functions".to_string(),
-            description: "Find the most complex functions ranked by cyclomatic complexity"
-                .to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of results (default: 20)"
-                    },
-                    "repository": {
-                        "type": "string",
-                        "description": "Path of the indexed repository to query (optional)"
-                    }
-                }
-            }),
-        },
-        ToolDefinition {
-            name: "get_stats".to_string(),
-            description: "Get statistics about the indexed code graph".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "repository": {
-                        "type": "string",
-                        "description": "Path of the indexed repository to query (optional — omit to show all)"
                     }
                 }
             }),
@@ -196,125 +148,68 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "find_similar".to_string(),
-            description: "Find groups of potentially redundant/similar code. Requires index with annotate=true. Returns groups of nodes with similar structure and token overlap.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "kind": {
-                        "type": "string",
-                        "description": "Node type filter: Function, Class, Struct, Trait, Interface, Enum",
-                        "enum": ["Function", "Class", "Struct", "Trait", "Interface", "Enum"]
-                    },
-                    "min_lines": {
-                        "type": "integer",
-                        "description": "Minimum lines for a node to be considered (default: 5)"
-                    },
-                    "repository": {
-                        "type": "string",
-                        "description": "Path of the indexed repository to query (optional)"
-                    }
-                }
-            }),
-        },
-        ToolDefinition {
             name: "analyze_redundancy".to_string(),
-            description: "Run tiered redundancy analysis: finds passthrough wrappers, near-duplicates, \
-                structural similarity, merge candidates, and split candidates. Returns findings ranked \
-                Critical > High > Medium > Low. \
-                Output uses compact tags for Tiers ([C], [H], [M], [L]) and Type Initials (e.g. [PT]=PASSTHROUGH, [ND]=NEAR-DUPLICATE). \
-                Requires annotate=true on index.".to_string(),
+            description: "Tiered redundancy + code-health report: passthrough wrappers, near/structural \
+                duplicates, merge/split candidates, dead code, and anti-patterns, ranked Critical>High>Medium>Low. \
+                For dead code pass category='anti_patterns'. Tags: tiers [C]/[H]/[M]/[L]; types e.g. \
+                [PT]=passthrough [ND]=near-dup [DC]=dead-code. Needs annotate=true on index.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "min_tier": {
-                        "type": "string",
-                        "description": "Minimum tier to include (default: low)",
-                        "enum": ["critical", "high", "medium", "low"]
-                    },
-                    "min_lines": {
-                        "type": "integer",
-                        "description": "Minimum function lines to consider (default: 3)"
-                    },
-                    "near_dup_threshold": {
-                        "type": "number",
-                        "description": "Similarity threshold for near-duplicate detection 0.0-1.0 (default: 0.80)"
-                    },
-                    "structural_threshold": {
-                        "type": "number",
-                        "description": "Similarity threshold for structural similarity 0.0-1.0 (default: 0.50)"
-                    },
-                    "merge_threshold": {
-                        "type": "number",
-                        "description": "Shared line ratio for merge candidates 0.0-1.0 (default: 0.40)"
-                    },
-                    "skip_checks": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "List of specific checks or categories to skip (e.g., ['detect_dead_code', 'anti_patterns'])"
-                    },
-                    "include_source": {
-                        "type": "boolean",
-                        "description": "Include full source code snippets in output. Significantly increases context usage. (default: false)"
-                    },
                     "category": {
                         "type": "string",
-                        "description": "Filter findings to a specific category",
+                        "description": "Restrict to one category of findings",
                         "enum": ["redundancy", "struct_enum", "type_suggestions", "design_patterns",
                                  "anti_patterns", "pattern_detection", "structural", "type_system",
                                  "metrics", "risk", "testing", "blast_radius", "api_surface",
                                  "cross_language", "config_detection", "data_structures",
                                  "code_quality", "optimization"]
                     },
-                    "limit_per_type": {
-                        "type": "integer",
-                        "description": "Maximum number of findings to return per redundancy type (default: 5, 0 = all)"
+                    "min_tier": {
+                        "type": "string",
+                        "description": "Lowest tier to report (default low)",
+                        "enum": ["critical", "high", "medium", "low"]
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum number of total findings to return (default: no limit)"
+                        "description": "Max findings (default 40; full report ~25k tokens; 0=all)"
+                    },
+                    "include_source": {
+                        "type": "boolean",
+                        "description": "Rarely needed: each finding already names its symbol and file:line. Only set true to read the actual duplicated code; much larger output (default false)"
                     },
                     "repository": {
                         "type": "string",
-                        "description": "Path of the indexed repository to query (optional)"
+                        "description": "Indexed repo to query (optional)"
                     }
                 }
             }),
         },
         ToolDefinition {
             name: "get_context_for_symbol".to_string(),
-            description: "Get all context an LLM needs before editing a symbol: its source, \
-                direct callers, direct callees, and similar functions — in one call.".to_string(),
+            description: "One-call deep dive on a named symbol: source (or value/default for a \
+                const/field), callers, callees, references (inherits/implements/imports/tests), and \
+                similar code — instead of chaining separate lookups. Accepts an EXACT or APPROXIMATE \
+                name and resolves the best match (listing any alternatives), so call it DIRECTLY with \
+                the name you want — no find_code lookup first. To inspect SEVERAL symbols at once, pass \
+                a comma-separated list (e.g. 'CodeGraph, GraphNode, build') — one call instead of many. \
+                Resolves a struct field or enum variant to its owning type. depth>1 adds the transitive \
+                call chain + blast radius.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Name of the symbol to get context for"
+                        "description": "Symbol name (or a struct field / enum variant). Comma-separate several names to inspect them all in one call."
                     },
                     "kind": {
                         "type": "string",
-                        "description": "Optional type filter: Function, Class, Struct, Trait, Interface, Enum",
+                        "description": "Type filter — only needed to disambiguate when several symbols share the name (the result lists them). Usually omit it.",
                         "enum": ["Function", "Class", "Struct", "Trait", "Interface", "Enum"]
                     },
-                    "repository": {
-                        "type": "string",
-                        "description": "Path of the indexed repository to query (optional)"
-                    }
-                },
-                "required": ["name"]
-            }),
-        },
-        ToolDefinition {
-            name: "find_references".to_string(),
-            description: "Find all usages of a symbol across the codebase: callers, inheritors, \
-                implementors, and files that import it — more thorough than analyze_relationships.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Name of the symbol to find references to"
+                    "depth": {
+                        "type": "integer",
+                        "description": "Transitive depth (default 1 = direct only). depth>1 adds the call chain (transitive callees) and blast radius (transitive callers) for impact analysis."
                     },
                     "repository": {
                         "type": "string",
@@ -322,25 +217,6 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                     }
                 },
                 "required": ["name"]
-            }),
-        },
-        ToolDefinition {
-            name: "get_module_overview".to_string(),
-            description: "Get a directory-level overview: files, their public/private symbol \
-                counts, lines of code, and cross-file call relationships within the module.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Directory path to summarise (absolute or partial, e.g. 'src/parser')"
-                    },
-                    "repository": {
-                        "type": "string",
-                        "description": "Path of the indexed repository to query (optional)"
-                    }
-                },
-                "required": ["path"]
             }),
         },
         ToolDefinition {
@@ -371,29 +247,6 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                 "required": ["path"]
             }),
         },
-        ToolDefinition {
-            name: "get_source".to_string(),
-            description: "Get the source code snippet for a named symbol (function, class, struct, etc.). Requires index with annotate=true.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Name of the symbol to retrieve source for"
-                    },
-                    "kind": {
-                        "type": "string",
-                        "description": "Optional node type filter: Function, Class, Struct, Trait, Interface, Enum",
-                        "enum": ["Function", "Class", "Struct", "Trait", "Interface", "Enum"]
-                    },
-                    "repository": {
-                        "type": "string",
-                        "description": "Path of the indexed repository to query (optional)"
-                    }
-                },
-                "required": ["name"]
-            }),
-        },
     ]
 }
 
@@ -413,6 +266,8 @@ pub fn handle_tool(state: &SharedState, tool_name: &str, args: &serde_json::Valu
         "get_context_for_symbol" => handle_get_context_for_symbol(state, args),
         "find_references" => handle_find_references(state, args),
         "get_module_overview" => handle_get_module_overview(state, args),
+        "get_overview" => handle_get_overview(state, args),
+        "get_repo_map" => handle_get_repo_map(state, args),
         "save_graph" => handle_save_graph(state, args),
         "load_graph" => handle_load_graph(state, args),
         "get_source" => handle_get_source(state, args),
@@ -608,45 +463,302 @@ where
     with_graph(state, None, f)
 }
 
+/// True for paths that hold test fixtures, examples, or vendored grammars rather
+/// than the project's own production code — used to rank real symbols ahead of
+/// look-alikes when a bare name matches several.
+fn is_secondary_path(path: &str) -> bool {
+    let p = path.to_lowercase();
+    // Match a directory *segment* so root-relative paths (e.g. "tests/foo.rs",
+    // "examples/bar.rs") are caught, not just nested "/tests/" ones.
+    p.split('/').any(|seg| {
+        matches!(seg, "tests" | "test" | "examples" | "fixtures" | "grammars")
+            || seg.starts_with("test_project")
+    }) || p.ends_with("_test.rs")
+        || p.contains("fixture")
+}
+
+/// Normalize user-supplied `kind` synonyms to the graph's canonical node labels,
+/// so a reasonable guess (e.g. kind="Constant") still returns results instead of
+/// an empty turn. Consts/statics are stored as Variable; methods as Function.
+fn canonical_kind(k: &str) -> &str {
+    match k {
+        "Constant" | "Const" | "Static" => "Variable",
+        "Method" => "Function",
+        other => other,
+    }
+}
+
 fn handle_find_code(state: &SharedState, args: &serde_json::Value) -> ToolResult {
-    let query = match args.get("query").and_then(|v| v.as_str()) {
-        Some(q) => q,
-        None => {
-            return ToolResult {
-                content: vec![ToolContent::text(
-                    "Missing required parameter: query".into(),
-                )],
-                is_error: Some(true),
-            }
-        }
-    };
-    let kind_filter = args.get("kind").and_then(|v| v.as_str());
+    // query is optional: omitting it (with a `kind`) lists all symbols of that kind.
+    let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+    let kind_filter = args.get("kind").and_then(|v| v.as_str()).map(canonical_kind);
+    // Empty query is allowed only as a "list everything of this kind" browse —
+    // otherwise it's meaningless (and would match every field).
+    if query.trim().is_empty() && kind_filter.is_none() {
+        return ToolResult {
+            content: vec![ToolContent::text(
+                "Provide a search query (a name or partial name), or a `kind` to list all symbols of that type.".into(),
+            )],
+            is_error: Some(true),
+        };
+    }
     let repo = args.get("repository").and_then(|v| v.as_str());
 
     with_graph(state, repo, |graph| {
-        let results = graph.search_by_name(query);
-        let filtered: Vec<_> = results
-            .into_iter()
-            .filter(|(_, node)| {
-                if let Some(kind) = kind_filter {
-                    node.label() == kind
-                } else {
-                    true
-                }
-            })
-            .take(50)
-            .collect();
+        let q = query.to_lowercase();
+        // List mode (empty query + kind): enumerate all nodes of that kind.
+        let filtered: Vec<_> = if q.is_empty() {
+            graph
+                .nodes_by_label(kind_filter.unwrap_or(""))
+                .into_iter()
+                .take(50)
+                .collect()
+        } else {
+            graph
+                .search_by_name(query)
+                .into_iter()
+                .filter(|(_, node)| kind_filter.is_none_or(|k| node.label() == k))
+                .take(50)
+                .collect()
+        };
+        let seen: std::collections::HashSet<_> = filtered.iter().map(|(idx, _)| *idx).collect();
 
-        if filtered.is_empty() {
+        // Struct/class field names and enum variant names aren't node names, so a
+        // plain name search misses them. Match them too and return the owning type.
+        let field_str = |f: &crate::types::node::FieldDecl| {
+            let ty = f.type_annotation.as_deref().map(|t| format!(": {t}")).unwrap_or_default();
+            let dv = f.default_value.as_deref().map(|v| format!(" = {v}")).unwrap_or_default();
+            format!("field {}{ty}{dv}", f.name)
+        };
+        // Only match fields/variants for queries of real length — a 0–1 char
+        // query would otherwise match every field of every type.
+        let mut member_hits: Vec<(String, String)> = Vec::new();
+        for idx in graph.graph.node_indices() {
+            if q.len() < 2 || seen.contains(&idx) {
+                continue;
+            }
+            let node = &graph.graph[idx];
+            if kind_filter.is_some_and(|k| node.label() != k) {
+                continue;
+            }
+            let matched = match node {
+                GraphNode::Struct(s) => s.fields.iter().find(|f| f.name.to_lowercase().contains(&q)).map(field_str),
+                GraphNode::Class(c) => c.fields.iter().find(|f| f.name.to_lowercase().contains(&q)).map(field_str),
+                GraphNode::Enum(e) => e
+                    .variants
+                    .iter()
+                    .find(|v| v.to_lowercase().contains(&q))
+                    .map(|v| format!("variant {v}")),
+                _ => None,
+            };
+            if let Some(m) = matched {
+                member_hits.push((format_node(node), m));
+                if member_hits.len() >= 50 {
+                    break;
+                }
+            }
+        }
+
+        if filtered.is_empty() && member_hits.is_empty() {
+            // Steer the model in THIS turn instead of forcing a retry: split the
+            // query into word parts and surface the closest-named symbols.
+            let mut sugg: Vec<String> = Vec::new();
+            let mut seen_s = std::collections::HashSet::new();
+            // Longer word-parts are usually the rarer, more specific ones (e.g.
+            // "version" beats "graph") — match them first so the best hint leads.
+            let mut parts: Vec<&str> =
+                query.split(|c: char| !c.is_alphanumeric()).filter(|p| p.len() >= 3).collect();
+            parts.sort_by_key(|p| std::cmp::Reverse(p.len()));
+            for part in parts {
+                for (idx, node) in graph.search_by_name(part) {
+                    if kind_filter.is_none_or(|k| node.label() == k) && seen_s.insert(idx) {
+                        sugg.push(format_node_brief(node));
+                        if sugg.len() >= 5 {
+                            break;
+                        }
+                    }
+                }
+                if sugg.len() >= 5 {
+                    break;
+                }
+            }
+            let msg = if sugg.is_empty() {
+                format!("No results found for '{query}'")
+            } else {
+                format!("No exact match for '{query}'. Closest symbols:\n\n  {}", sugg.join("\n  "))
+            };
             return ToolResult {
-                content: vec![ToolContent::text(format!("No results found for '{query}'"))],
+                content: vec![ToolContent::text(msg)],
                 is_error: None,
             };
         }
 
-        let mut text = format!("Found {} results for '{query}':\n\n", filtered.len());
-        for (_, node) in &filtered {
-            text.push_str(&format_node(node));
+        let mut text = String::new();
+        if !filtered.is_empty() {
+            if q.is_empty() {
+                text.push_str(&format!(
+                    "All {} (showing {}):\n\n",
+                    kind_filter.unwrap_or("symbols"),
+                    filtered.len()
+                ));
+            } else {
+                text.push_str(&format!("Found {} results for '{query}':\n\n", filtered.len()));
+            }
+            for (_, node) in &filtered {
+                // Compact one-liner when listing a whole kind; full node otherwise.
+                if q.is_empty() {
+                    text.push_str(&format!("  {}\n", format_node_brief(node)));
+                } else {
+                    text.push_str(&format_node(node));
+                    text.push('\n');
+                }
+            }
+        }
+        if !member_hits.is_empty() {
+            text.push_str(&format!(
+                "\n{} type(s) with a matching field/variant for '{query}':\n\n",
+                member_hits.len()
+            ));
+            for (owner, member) in &member_hits {
+                text.push_str(&format!("{}  ⟶ {member}\n", owner.trim_start()));
+            }
+        }
+
+        ToolResult {
+            content: vec![ToolContent::text(text)],
+            is_error: None,
+        }
+    })
+}
+
+/// Unified overview: a file path (has an extension) → its symbols; a directory
+/// path → the module overview. Folds get_file_summary + get_module_overview.
+fn handle_get_overview(state: &SharedState, args: &serde_json::Value) -> ToolResult {
+    let is_file = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .is_some_and(|p| std::path::Path::new(p).extension().is_some());
+    if is_file {
+        handle_get_file_summary(state, args)
+    } else {
+        handle_get_module_overview(state, args)
+    }
+}
+
+/// Rank nodes by importance via PageRank over reference-like edges (Calls /
+/// Inherits / Implements): rank flows from a user to the thing it uses, so
+/// heavily-called functions and widely-implemented traits accumulate weight.
+/// This is the ranking behind the repo map (à la Aider's PageRank repo map).
+fn pagerank(graph: &CodeGraph) -> std::collections::HashMap<petgraph::graph::NodeIndex, f64> {
+    use petgraph::visit::EdgeRef;
+    let g = &graph.graph;
+    let edge_ok =
+        |e: &EdgeKind| matches!(e, EdgeKind::Calls { .. } | EdgeKind::Inherits | EdgeKind::Implements);
+    let nodes: Vec<_> = g.node_indices().collect();
+    let n = nodes.len().max(1) as f64;
+    let mut rank: std::collections::HashMap<_, f64> =
+        nodes.iter().map(|&i| (i, 1.0 / n)).collect();
+    let out_deg: std::collections::HashMap<_, usize> = nodes
+        .iter()
+        .map(|&i| (i, g.edges(i).filter(|e| edge_ok(e.weight())).count()))
+        .collect();
+
+    const DAMPING: f64 = 0.85;
+    for _ in 0..20 {
+        let mut next: std::collections::HashMap<_, f64> =
+            nodes.iter().map(|&i| (i, (1.0 - DAMPING) / n)).collect();
+        for &i in &nodes {
+            let d = out_deg[&i];
+            if d == 0 {
+                continue;
+            }
+            let share = DAMPING * rank[&i] / d as f64;
+            for e in g.edges(i).filter(|e| edge_ok(e.weight())) {
+                *next.get_mut(&e.target()).unwrap() += share;
+            }
+        }
+        rank = next;
+    }
+    rank
+}
+
+/// Flagship token-saver: a graph-ranked "repo map" — the most important symbols
+/// across the whole codebase, rendered as signature skeletons (bodies elided) up
+/// to a token budget. Lets an agent grasp a codebase's shape in ~1-2k tokens
+/// instead of reading files. Modeled on Aider's PageRank repo map.
+fn handle_get_repo_map(state: &SharedState, args: &serde_json::Value) -> ToolResult {
+    let budget_tokens = args.get("budget").and_then(|v| v.as_u64()).unwrap_or(1500) as usize;
+    let repo = args.get("repository").and_then(|v| v.as_str());
+
+    with_graph(state, repo, |graph| {
+        let rank = pagerank(graph);
+        // Definition nodes only, and only the project's own code (skip fixtures).
+        let mut ranked: Vec<(&GraphNode, f64)> = graph
+            .graph
+            .node_indices()
+            .filter_map(|i| {
+                let node = &graph.graph[i];
+                let is_def = matches!(
+                    node,
+                    GraphNode::Function(_)
+                        | GraphNode::Class(_)
+                        | GraphNode::Struct(_)
+                        | GraphNode::Trait(_)
+                        | GraphNode::Interface(_)
+                        | GraphNode::Enum(_)
+                );
+                if is_def && !is_secondary_path(&node.location().0) {
+                    Some((node, rank.get(&i).copied().unwrap_or(0.0)))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if ranked.is_empty() {
+            return ToolResult {
+                content: vec![ToolContent::text(
+                    "No symbols to map — index a repository first (with annotate=true).".into(),
+                )],
+                is_error: None,
+            };
+        }
+
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Greedily take top-ranked symbols until the char budget (≈ tokens×4) is
+        // spent, then regroup by file for a readable map.
+        let char_budget = budget_tokens.saturating_mul(4);
+        let mut used = 0usize;
+        let mut by_file: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        let mut shown = 0usize;
+        let total = ranked.len();
+        for (node, _) in &ranked {
+            let (file, line, _) = node.location();
+            let line_str = match node {
+                GraphNode::Function(f) => format!("  {}  (:{})", fn_signature(f), f.span.start_line),
+                other => format!("  {} {}  (:{line})", other.short_label(), other.name()),
+            };
+            let header_cost = if by_file.contains_key(&file) { 0 } else { file.len() + 1 };
+            if used + line_str.len() + 1 + header_cost > char_budget && shown > 0 {
+                break;
+            }
+            used += line_str.len() + 1 + header_cost;
+            by_file.entry(file).or_default().push(line_str);
+            shown += 1;
+        }
+
+        let mut text = format!(
+            "Repo map — {shown} most important symbols of {total} (PageRank-ranked, budget ≈{budget_tokens} tokens).\n\
+             Signatures only; use get_overview <file> or get_context_for_symbol <name> to drill in.\n\n"
+        );
+        for (file, lines) in &by_file {
+            text.push_str(file);
+            text.push('\n');
+            for l in lines {
+                text.push_str(l);
+                text.push('\n');
+            }
             text.push('\n');
         }
 
@@ -684,7 +796,10 @@ fn handle_get_file_summary(state: &SharedState, args: &serde_json::Value) -> Too
                     GraphNode::Trait(t) => Some(t.path.as_path()),
                     GraphNode::Interface(i) => Some(i.path.as_path()),
                     GraphNode::Enum(e) => Some(e.path.as_path()),
-                    GraphNode::Variable(v) => Some(v.path.as_path()),
+                    // Module-level vars/consts are skeleton; function-local vars
+                    // (context = enclosing fn) are body — drop them from the outline.
+                    GraphNode::Variable(v) if v.context.is_none() => Some(v.path.as_path()),
+                    GraphNode::Variable(_) => None,
                     GraphNode::Macro(m) => Some(m.path.as_path()),
                     _ => None,
                 }?;
@@ -1078,7 +1193,7 @@ fn handle_find_similar(state: &SharedState, args: &serde_json::Value) -> ToolRes
 }
 
 fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> ToolResult {
-    use crate::redundancy::{self, AnalysisConfig, FindingKind, Tier};
+    use crate::redundancy::{self, AnalysisConfig, Tier};
 
     let min_tier = match args
         .get("min_tier")
@@ -1095,6 +1210,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
     let near_dup = args.get("near_dup_threshold").and_then(|v| v.as_f64());
     let structural = args.get("structural_threshold").and_then(|v| v.as_f64());
     let merge = args.get("merge_threshold").and_then(|v| v.as_f64());
+    let structural_confirm = args.get("structural_confirm").and_then(|v| v.as_f64());
     let skip_checks = args
         .get("skip_checks")
         .and_then(|v| v.as_array())
@@ -1113,10 +1229,15 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         .and_then(|v| v.as_u64())
         .map(|v| v as usize)
         .unwrap_or(5);
-    let limit = args
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize);
+    // Cap total findings by default — the full report can be ~25k tokens, which
+    // is unusable inside an agent loop. Callers can raise it or pass 0 for all.
+    // (Source snippets are capped separately below so a low limit doesn't, via
+    // the shuffle, randomly drop the specific finding the caller is after.)
+    let limit = match args.get("limit").and_then(|v| v.as_u64()) {
+        Some(0) => None,
+        Some(v) => Some(v as usize),
+        None => Some(40),
+    };
     let category = args
         .get("category")
         .and_then(|v| v.as_str())
@@ -1150,6 +1271,9 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         if let Some(v) = merge {
             config.merge_threshold = v;
         }
+        if let Some(v) = structural_confirm {
+            config.structural_confirm_threshold = v;
+        }
 
         let findings = redundancy::analyze(graph, &config);
         let mut filtered: Vec<_> = findings
@@ -1157,10 +1281,43 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
             .filter(|f| f.tier <= min_tier)
             .collect();
 
-        // Randomize findings so that limits don't always return the exact same items
-        use rand::seq::SliceRandom;
-        let mut rng = rand::rng();
-        filtered.shuffle(&mut rng);
+        // Normalize each finding's member order: several checks collect node
+        // indices from a HashSet, whose iteration order Rust randomizes per
+        // process. Sorting here makes the rendered "└─" list deterministic for
+        // every finding kind in one place. (Passthrough's wrapper-vs-target order
+        // doesn't matter here — its body render locates the wrapper by name.)
+        for f in &mut filtered {
+            f.node_indices.sort_unstable();
+        }
+
+        // Order by tier (Critical first), and within a tier keep findings in the
+        // project's own code above ones that live entirely in test fixtures /
+        // examples — those are usually noise when hunting real redundancy. Runs
+        // BEFORE the per-type cap so production findings win the limited slots.
+        // Output is DETERMINISTIC: the old rand shuffle existed only to rotate
+        // past a flood of false positives (mostly the now-clustered pairwise
+        // SuggestParameterStruct findings); with that fixed, stable output is
+        // preferable (reproducible, cache-friendly, no re-examining churn).
+        let is_secondary_finding = |f: &redundancy::Finding| {
+            !f.node_indices.is_empty()
+                && f.node_indices.iter().all(|&ni| {
+                    graph
+                        .get_node(petgraph::graph::NodeIndex::new(ni))
+                        .map(|n| is_secondary_path(&n.location().0))
+                        .unwrap_or(false)
+                })
+        };
+        // Fully deterministic order: tier, then production-before-fixtures, then a
+        // stable tiebreak on the finding's (sorted) node indices. Without the
+        // tiebreak, ties fall back to checks' HashMap iteration order, which Rust
+        // randomizes per process — making output differ run to run.
+        filtered.sort_by_cached_key(|f| {
+            let mut idx = f.node_indices.clone();
+            idx.sort_unstable();
+            // description is the final tiebreak for findings with no node_indices
+            // (e.g. data clumps); their descriptions are built deterministically.
+            (f.tier, is_secondary_finding(f), idx, f.description.clone())
+        });
 
         if limit_per_type > 0 {
             let mut counts = std::collections::HashMap::new();
@@ -1170,9 +1327,6 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                 *count <= limit_per_type
             });
         }
-
-        // Restore ordering by tier (Critical first)
-        filtered.sort_by_key(|f| f.tier);
 
         if filtered.is_empty() {
             return ToolResult {
@@ -1202,8 +1356,10 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         let display_filtered = if let Some(l) = limit {
             if filtered.len() > l {
                 text.push_str(&format!(
-                    "(Showing top {} findings due to limit parameter)\n\n",
-                    l
+                    "(Showing top {} of {} findings; pass limit=0 for all, or narrow with \
+                     category=… / min_tier=high)\n\n",
+                    l,
+                    filtered.len()
                 ));
             }
             filtered.into_iter().take(l).collect::<Vec<_>>()
@@ -1215,280 +1371,19 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         // Only include codes that actually appear in this result set.
         {
             use std::collections::BTreeSet;
-            let used_tags: BTreeSet<&str> = display_filtered.iter().map(|f| match &f.kind {
-                FindingKind::Passthrough { .. } => "P=passthrough",
-                FindingKind::NearDuplicate { .. } => "ND=near-dup",
-                FindingKind::StructurallySimilar { .. } => "S=similar",
-                FindingKind::MergeCandidate { .. } => "M=merge",
-                FindingKind::SplitCandidate { .. } => "SP=split",
-                FindingKind::OverlappingStructs { .. } => "SO=struct-overlap",
-                FindingKind::OverlappingEnums { .. } => "EO=enum-overlap",
-                FindingKind::SuggestParameterStruct { .. } => "SS=suggest-struct",
-                FindingKind::SuggestEnumDispatch { .. } => "SED=suggest-enum",
-                FindingKind::SuggestTraitExtraction { .. } => "STE=suggest-trait",
-                FindingKind::SuggestFacade { .. } => "FAC=facade",
-                FindingKind::SuggestFactory { .. } => "FTY=factory",
-                FindingKind::SuggestBuilder { .. } => "SB=builder",
-                FindingKind::SuggestStrategy { .. } => "STR=strategy",
-                FindingKind::SuggestTemplateMethod { .. } => "TM=template-method",
-                FindingKind::SuggestObserver { .. } => "OBS=observer",
-                FindingKind::SuggestDecorator { .. } => "SD=decorator",
-                FindingKind::SuggestMediator { .. } => "MED=mediator",
-                FindingKind::GodClass { .. } => "GC=god-class",
-                FindingKind::CircularDependency { .. } => "CD=circular-dep",
-                FindingKind::FeatureEnvy { .. } => "FE=feature-envy",
-                FindingKind::ShotgunSurgery { .. } => "SG=shotgun-surgery",
-                FindingKind::DetectedSingleton { .. } => "SNG=singleton",
-                FindingKind::DetectedAdapter { .. } => "ADP=adapter",
-                FindingKind::DetectedProxy { .. } => "PRX=proxy",
-                FindingKind::DetectedCommand { .. } => "CMD=command",
-                FindingKind::DetectedChainOfResponsibility { .. } => "COR=chain-of-resp",
-                FindingKind::DetectedDependencyInjection { .. } => "DI=dep-injection",
-                FindingKind::DeadCode { .. } => "DC=dead-code",
-                FindingKind::LongParameterList { .. } => "LP=long-params",
-                FindingKind::DataClump { .. } => "DK=data-clump",
-                FindingKind::MiddleMan { .. } => "MM=middle-man",
-                FindingKind::LazyClass { .. } => "LZ=lazy-class",
-                FindingKind::RefusedBequest { .. } => "RB=refused-bequest",
-                FindingKind::SpeculativeGenerality { .. } => "SPG=speculative-generality",
-                FindingKind::InappropriateIntimacy { .. } => "II=inappropriate-intimacy",
-                FindingKind::DeepNesting { .. } => "DN=deep-nesting",
-                FindingKind::DetectedVisitor { .. } => "VIS=visitor",
-                FindingKind::DetectedIterator { .. } => "ITR=iterator",
-                FindingKind::DetectedState { .. } => "STA=state",
-                FindingKind::DetectedComposite { .. } => "CMP=composite",
-                FindingKind::DetectedRepository { .. } => "R=repository",
-                FindingKind::DetectedPrototype { .. } => "PRT=prototype",
-                FindingKind::HubModule { .. } => "HM=hub-module",
-                FindingKind::OrphanModule { .. } => "OM=orphan-module",
-                FindingKind::DivergentChange { .. } => "DV=divergent-change",
-                FindingKind::ParallelInheritance { .. } => "PI=parallel-inherit",
-                FindingKind::PrimitiveObsession { .. } => "PO=primitive-obsession",
-                FindingKind::LargeClass { .. } => "LCL=large-class",
-                FindingKind::UnstableDependency { .. } => "UD=unstable-dep",
-                FindingKind::DetectedFlyweight { .. } => "FLY=flyweight",
-                FindingKind::DetectedEventEmitter { .. } => "EE=event-emitter",
-                FindingKind::DetectedMemento { .. } => "MEM=memento",
-                FindingKind::DetectedFluentBuilder { .. } => "FB=fluent-builder",
-                FindingKind::DetectedNullObject { .. } => "NO=null-object",
-                FindingKind::InconsistentNaming { .. } => "IN=inconsistent-naming",
-                FindingKind::CircularPackageDependency { .. } => "CPD=circular-pkg-dep",
-                FindingKind::SuggestSumType { .. } => "SST=sum-type",
-                FindingKind::SuggestEnumFromHierarchy { .. } => "HTE=hierarchy-to-enum",
-                FindingKind::BooleanBlindness { .. } => "BB=bool-blindness",
-                FindingKind::SuggestNewtype { .. } => "SN=newtype",
-                FindingKind::SuggestSealedType { .. } => "SEL=sealed-type",
-                FindingKind::LargeProductType { .. } => "LPT=large-product-type",
-                FindingKind::AnemicDomainModel { .. } => "AM=anemic-model",
-                FindingKind::MagicNumber { .. } => "MN=magic-number",
-                FindingKind::MutableGlobalState { .. } => "MG=mutable-global",
-                FindingKind::EmptyCatch { .. } => "EC=empty-catch",
-                FindingKind::CallbackHell { .. } => "CH=callback-hell",
-                FindingKind::ApiInconsistency { .. } => "AI=api-inconsistency",
-                FindingKind::LackOfCohesion { .. } => "LC=low-cohesion",
-                FindingKind::HighCoupling { .. } => "HC=high-coupling",
-                FindingKind::ModuleInstability { .. } => "UM=unstable-module",
-                FindingKind::HighCognitiveComplexity { .. } => "CC=cognitive-complexity",
-                FindingKind::HighRiskFunction { .. } => "HRF=high-risk-fn",
-                FindingKind::HighRiskFile { .. } => "HRL=high-risk-file",
-                FindingKind::UntestedPublicFunction { .. } => "UP=untested-public",
-                FindingKind::LowTestRatio { .. } => "LTR=low-test-ratio",
-                FindingKind::IntegrationTestSmell { .. } => "IS=integration-smell",
-                FindingKind::HighBlastRadius { .. } => "HBR=high-blast-radius",
-                FindingKind::MisplacedFunction { .. } => "MF=misplaced-fn",
-                FindingKind::ImplicitModule { .. } => "IM=implicit-module",
-                FindingKind::UnstablePublicApi { .. } => "UPA=unstable-api",
-                FindingKind::UndocumentedPublicApi { .. } => "UA=undocumented-api",
-                FindingKind::LeakyAbstraction { .. } => "LA=leaky-abstraction",
-                FindingKind::FfiBoundary { .. } => "FFI=ffi-boundary",
-                FindingKind::SubprocessCall { .. } => "SUB=subprocess",
-                FindingKind::IpcBoundary { .. } => "IPC=ipc-boundary",
-                FindingKind::EnvVarUsage { .. } => "EV=env-var",
-                FindingKind::HardcodedEndpoint { .. } => "HE=hardcoded-endpoint",
-                FindingKind::FeatureFlag { .. } => "FF=feature-flag",
-                FindingKind::ConfigFileUsage { .. } => "CF=config-file",
-                FindingKind::VecUsedAsSet { .. } => "VAS=vec-as-set",
-                FindingKind::VecUsedAsMap { .. } => "VAM=vec-as-map",
-                FindingKind::LinearSearchInLoop { .. } => "LSIL=linear-search-in-loop",
-                FindingKind::StringConcatInLoop { .. } => "SCIL=string-concat-in-loop",
-                FindingKind::SortedVecForLookup { .. } => "SVL=sorted-vec-lookup",
-                FindingKind::NestedLoopLookup { .. } => "NLL=nested-loop-lookup",
-                FindingKind::HashMapWithSequentialKeys { .. } => "HSK=hashmap-seq-keys",
-                FindingKind::ExcessiveCollectIterate { .. } => "CI=collect-iterate",
-                FindingKind::UnusedImport { .. } => "UI=unused-import",
-                FindingKind::InconsistentErrorHandling { .. } => "IEH=inconsistent-error",
-                FindingKind::TechDebtComment { .. } => "TD=tech-debt",
-                FindingKind::CloneInLoop { .. } => "CIL=clone-in-loop",
-                FindingKind::RedundantCollectIterate { .. } => "RCI=redundant-collect",
-                FindingKind::RepeatedMapLookup { .. } => "RML=repeated-lookup",
-                FindingKind::VecNoPresize { .. } => "VNP=vec-no-presize",
-                FindingKind::SortThenFind { .. } => "STF=sort-then-find",
-                FindingKind::ListConcatInLoop { .. } => "LCO=list-concat-loop",
-                FindingKind::UnboundedRecursion { .. } => "URB=unbounded-recursion",
-                FindingKind::SuggestVectorize { .. } => "VEC=vectorize",
-                FindingKind::SuggestPolars { .. } => "POL=suggest-polars",
-                FindingKind::RegexRecompileInLoop { .. } => "RRC=regex-recompile",
-                FindingKind::MemoizationCandidate { .. } => "MCM=memoize-candidate",
-                FindingKind::ExceptionForControlFlow { .. } => "EFC=exception-control-flow",
-                FindingKind::NPlusOneQuery { .. } => "N1Q=n-plus-one-query",
-                FindingKind::SyncAsyncConflict { .. } => "SAC=sync-async-conflict",
-                FindingKind::RepeatedFormatInLoop { .. } => "RFI=repeated-format-loop",
-                FindingKind::SleepInLoop { .. } => "SLA=sleep-in-loop",
-                FindingKind::GeneratorOverList { .. } => "GEN=generator-over-list",
-                FindingKind::UnnecessaryChain { .. } => "UCH=unnecessary-chain",
-                FindingKind::LargeListIn { .. } => "LLI=large-list-in",
-                FindingKind::DictKeysIter { .. } => "DLK=dict-keys-iter",
-                FindingKind::UnclosedResource { .. } => "UCM=unclosed-resource",
-                FindingKind::EnumerateVsRangeLen { .. } => "ELV=enumerate-vs-range-len",
-                FindingKind::YieldFrom { .. } => "YLD=yield-from",
-                FindingKind::AppendInLoopExtend { .. } => "APD=append-loop-extend",
-                FindingKind::DoubleWithStatement { .. } => "DWS=double-with",
-                FindingKind::ImportInFunction { .. } => "IIF=import-in-function",
-                FindingKind::ConstantCondition { .. } => "CST=constant-condition",
-                FindingKind::RedundantNegation { .. } => "RNE=redundant-negation",
-                FindingKind::DefaultDictPattern { .. } => "DFC=default-dict-pattern",
-                FindingKind::EmptyStringCheck { .. } => "ESE=empty-string-check",
-            }).collect();
+            let used_tags: BTreeSet<&str> = display_filtered.iter().map(|f| f.kind.legend_entry()).collect();
             text.push_str("Tiers: C=critical H=high M=medium L=low\nCodes: ");
             text.push_str(&used_tags.into_iter().collect::<Vec<_>>().join(" "));
             text.push_str("\n\n");
         }
 
+        // Attach source snippets to only the first few findings — descriptions
+        // already carry the key info, and full source for dozens of findings is
+        // huge. This keeps every finding's description while bounding tokens.
+        const SOURCE_FINDING_CAP: usize = 3;
+        let mut source_shown = 0usize;
         for finding in &display_filtered {
-            let tag = match &finding.kind {
-                FindingKind::Passthrough { .. } => "P",
-                FindingKind::NearDuplicate { .. } => "ND",
-                FindingKind::StructurallySimilar { .. } => "S",
-                FindingKind::MergeCandidate { .. } => "M",
-                FindingKind::SplitCandidate { .. } => "SP",
-                FindingKind::OverlappingStructs { .. } => "SO",
-                FindingKind::OverlappingEnums { .. } => "EO",
-                FindingKind::SuggestParameterStruct { .. } => "SS",
-                FindingKind::SuggestEnumDispatch { .. } => "SED",
-                FindingKind::SuggestTraitExtraction { .. } => "STE",
-                FindingKind::SuggestFacade { .. } => "FAC",
-                FindingKind::SuggestFactory { .. } => "FTY",
-                FindingKind::SuggestBuilder { .. } => "SB",
-                FindingKind::SuggestStrategy { .. } => "STR",
-                FindingKind::SuggestTemplateMethod { .. } => "TM",
-                FindingKind::SuggestObserver { .. } => "OBS",
-                FindingKind::SuggestDecorator { .. } => "SD",
-                FindingKind::SuggestMediator { .. } => "MED",
-                FindingKind::GodClass { .. } => "GC",
-                FindingKind::CircularDependency { .. } => "CD",
-                FindingKind::FeatureEnvy { .. } => "FE",
-                FindingKind::ShotgunSurgery { .. } => "SG",
-                FindingKind::DetectedSingleton { .. } => "SNG",
-                FindingKind::DetectedAdapter { .. } => "ADP",
-                FindingKind::DetectedProxy { .. } => "PRX",
-                FindingKind::DetectedCommand { .. } => "CMD",
-                FindingKind::DetectedChainOfResponsibility { .. } => "COR",
-                FindingKind::DetectedDependencyInjection { .. } => "DI",
-                FindingKind::DeadCode { .. } => "DC",
-                FindingKind::LongParameterList { .. } => "LP",
-                FindingKind::DataClump { .. } => "DK",
-                FindingKind::MiddleMan { .. } => "MM",
-                FindingKind::LazyClass { .. } => "LZ",
-                FindingKind::RefusedBequest { .. } => "RB",
-                FindingKind::SpeculativeGenerality { .. } => "SPG",
-                FindingKind::InappropriateIntimacy { .. } => "II",
-                FindingKind::DeepNesting { .. } => "DN",
-                FindingKind::DetectedVisitor { .. } => "VIS",
-                FindingKind::DetectedIterator { .. } => "ITR",
-                FindingKind::DetectedState { .. } => "STA",
-                FindingKind::DetectedComposite { .. } => "CMP",
-                FindingKind::DetectedRepository { .. } => "R",
-                FindingKind::DetectedPrototype { .. } => "PRT",
-                FindingKind::HubModule { .. } => "HM",
-                FindingKind::OrphanModule { .. } => "OM",
-                FindingKind::DivergentChange { .. } => "DV",
-                FindingKind::ParallelInheritance { .. } => "PI",
-                FindingKind::PrimitiveObsession { .. } => "PO",
-                FindingKind::LargeClass { .. } => "LCL",
-                FindingKind::UnstableDependency { .. } => "UD",
-                FindingKind::DetectedFlyweight { .. } => "FLY",
-                FindingKind::DetectedEventEmitter { .. } => "EE",
-                FindingKind::DetectedMemento { .. } => "MEM",
-                FindingKind::DetectedFluentBuilder { .. } => "FB",
-                FindingKind::DetectedNullObject { .. } => "NO",
-                FindingKind::InconsistentNaming { .. } => "IN",
-                FindingKind::CircularPackageDependency { .. } => "CPD",
-                FindingKind::SuggestSumType { .. } => "SST",
-                FindingKind::SuggestEnumFromHierarchy { .. } => "HTE",
-                FindingKind::BooleanBlindness { .. } => "BB",
-                FindingKind::SuggestNewtype { .. } => "SN",
-                FindingKind::SuggestSealedType { .. } => "SEL",
-                FindingKind::LargeProductType { .. } => "LPT",
-                FindingKind::AnemicDomainModel { .. } => "AM",
-                FindingKind::MagicNumber { .. } => "MN",
-                FindingKind::MutableGlobalState { .. } => "MG",
-                FindingKind::EmptyCatch { .. } => "EC",
-                FindingKind::CallbackHell { .. } => "CH",
-                FindingKind::ApiInconsistency { .. } => "AI",
-                FindingKind::LackOfCohesion { .. } => "LC",
-                FindingKind::HighCoupling { .. } => "HC",
-                FindingKind::ModuleInstability { .. } => "UM",
-                FindingKind::HighCognitiveComplexity { .. } => "CC",
-                FindingKind::HighRiskFunction { .. } => "HRF",
-                FindingKind::HighRiskFile { .. } => "HRL",
-                FindingKind::UntestedPublicFunction { .. } => "UP",
-                FindingKind::LowTestRatio { .. } => "LTR",
-                FindingKind::IntegrationTestSmell { .. } => "IS",
-                FindingKind::HighBlastRadius { .. } => "HBR",
-                FindingKind::MisplacedFunction { .. } => "MF",
-                FindingKind::ImplicitModule { .. } => "IM",
-                FindingKind::UnstablePublicApi { .. } => "UPA",
-                FindingKind::UndocumentedPublicApi { .. } => "UA",
-                FindingKind::LeakyAbstraction { .. } => "LA",
-                FindingKind::FfiBoundary { .. } => "FFI",
-                FindingKind::SubprocessCall { .. } => "SUB",
-                FindingKind::IpcBoundary { .. } => "IPC",
-                FindingKind::EnvVarUsage { .. } => "EV",
-                FindingKind::HardcodedEndpoint { .. } => "HE",
-                FindingKind::FeatureFlag { .. } => "FF",
-                FindingKind::ConfigFileUsage { .. } => "CF",
-                FindingKind::VecUsedAsSet { .. } => "VAS",
-                FindingKind::VecUsedAsMap { .. } => "VAM",
-                FindingKind::LinearSearchInLoop { .. } => "LSIL",
-                FindingKind::StringConcatInLoop { .. } => "SCIL",
-                FindingKind::SortedVecForLookup { .. } => "SVL",
-                FindingKind::NestedLoopLookup { .. } => "NLL",
-                FindingKind::HashMapWithSequentialKeys { .. } => "HSK",
-                FindingKind::ExcessiveCollectIterate { .. } => "CI",
-                FindingKind::UnusedImport { .. } => "UI",
-                FindingKind::InconsistentErrorHandling { .. } => "IEH",
-                FindingKind::TechDebtComment { .. } => "TD",
-                FindingKind::CloneInLoop { .. } => "CIL",
-                FindingKind::RedundantCollectIterate { .. } => "RCI",
-                FindingKind::RepeatedMapLookup { .. } => "RML",
-                FindingKind::VecNoPresize { .. } => "VNP",
-                FindingKind::SortThenFind { .. } => "STF",
-                FindingKind::ListConcatInLoop { .. } => "LCO",
-                FindingKind::UnboundedRecursion { .. } => "URB",
-                FindingKind::SuggestVectorize { .. } => "VEC",
-                FindingKind::SuggestPolars { .. } => "POL",
-                FindingKind::RegexRecompileInLoop { .. } => "RRC",
-                FindingKind::MemoizationCandidate { .. } => "MCM",
-                FindingKind::ExceptionForControlFlow { .. } => "EFC",
-                FindingKind::NPlusOneQuery { .. } => "N1Q",
-                FindingKind::SyncAsyncConflict { .. } => "SAC",
-                FindingKind::RepeatedFormatInLoop { .. } => "RFI",
-                FindingKind::SleepInLoop { .. } => "SLA",
-                FindingKind::GeneratorOverList { .. } => "GEN",
-                FindingKind::UnnecessaryChain { .. } => "UCH",
-                FindingKind::LargeListIn { .. } => "LLI",
-                FindingKind::DictKeysIter { .. } => "DLK",
-                FindingKind::UnclosedResource { .. } => "UCM",
-                FindingKind::EnumerateVsRangeLen { .. } => "ELV",
-                FindingKind::YieldFrom { .. } => "YLD",
-                FindingKind::AppendInLoopExtend { .. } => "APD",
-                FindingKind::DoubleWithStatement { .. } => "DWS",
-                FindingKind::ImportInFunction { .. } => "IIF",
-                FindingKind::ConstantCondition { .. } => "CST",
-                FindingKind::RedundantNegation { .. } => "RNE",
-                FindingKind::DefaultDictPattern { .. } => "DFC",
-                FindingKind::EmptyStringCheck { .. } => "ESE",
-            };
+            let tag = finding.kind.short_code();
 
             let tier_flag = match finding.tier {
                 Tier::Critical => "C",
@@ -1501,7 +1396,8 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                 finding.description
             ));
 
-            if include_source {
+            if include_source && source_shown < SOURCE_FINDING_CAP {
+                source_shown += 1;
                 for &ni in &finding.node_indices {
                     let node_idx = petgraph::graph::NodeIndex::new(ni);
                     if let Some(node) = graph.get_node(node_idx) {
@@ -1528,6 +1424,30 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                     }
                 }
             } else {
+                // A passthrough's wrapper body IS the evidence for the claim and
+                // is tiny by definition (cc=1, a few lines). Inline it so the model
+                // doesn't spend a heavy get_context call just to confirm the
+                // delegation it was already told about.
+                if let redundancy::FindingKind::Passthrough { wrapper_name, .. } = &finding.kind {
+                    // Locate the wrapper by name (node_indices is now sorted, so
+                    // position is no longer meaningful).
+                    if let Some(node) = finding
+                        .node_indices
+                        .iter()
+                        .filter_map(|&ni| graph.get_node(petgraph::graph::NodeIndex::new(ni)))
+                        .find(|n| n.name() == wrapper_name)
+                    {
+                        if let Some(src) = node.source_snippet() {
+                            for line in src.lines().take(4) {
+                                text.push_str(&format!("    │ {line}\n"));
+                            }
+                            if src.lines().count() > 4 {
+                                text.push_str("    │ ...\n");
+                            }
+                        }
+                    }
+                }
+
                 let mut nodes_info = Vec::new();
                 for &ni in &finding.node_indices {
                     let node_idx = petgraph::graph::NodeIndex::new(ni);
@@ -1541,7 +1461,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                         } else {
                             format!("({})", path_str)
                         };
-                        
+
                         nodes_info.push(format!("{}({}){}", node.name(), node.short_label(), loc_str));
                     }
                 }
@@ -1643,57 +1563,92 @@ fn handle_get_source(state: &SharedState, args: &serde_json::Value) -> ToolResul
     let repo = args.get("repository").and_then(|v| v.as_str());
 
     with_graph(state, repo, |graph| {
-        let results = graph.search_by_name(name);
-        let filtered: Vec<_> = results
+        let filtered: Vec<_> = graph
+            .search_by_name(name)
             .into_iter()
-            .filter(|(_, node)| {
-                if let Some(kind) = kind_filter {
-                    node.label() == kind
-                } else {
-                    true
-                }
-            })
+            .filter(|(_, node)| kind_filter.is_none_or(|k| node.label() == k))
             .collect();
 
-        if filtered.is_empty() {
+        if !filtered.is_empty() {
+            let mut text = String::new();
+            for (_, node) in filtered.iter().take(5) {
+                text.push_str(&format_node(node));
+                text.push('\n');
+                match node.source_snippet() {
+                    Some(src) => {
+                        text.push_str("```\n");
+                        text.push_str(src);
+                        if !src.ends_with('\n') {
+                            text.push('\n');
+                        }
+                        text.push_str("```\n");
+                    }
+                    // Constants/variables carry their value in the header line above,
+                    // so don't nag about missing source for them.
+                    None if !matches!(node, GraphNode::Variable(_)) => {
+                        text.push_str(
+                            "  (no source available — re-index with annotate=true to enable)\n",
+                        );
+                    }
+                    None => {}
+                }
+                text.push('\n');
+            }
+            if filtered.len() > 5 {
+                text.push_str(&format!("... and {} more matches\n", filtered.len() - 5));
+            }
             return ToolResult {
-                content: vec![ToolContent::text(format!(
-                    "No symbol found matching '{name}'"
-                ))],
+                content: vec![ToolContent::text(text)],
                 is_error: None,
             };
         }
 
-        let mut text = String::new();
-        for (_, node) in filtered.iter().take(5) {
-            text.push_str(&format_node(node));
-            text.push('\n');
-            match node.source_snippet() {
-                Some(src) => {
-                    text.push_str("```\n");
-                    text.push_str(src);
-                    if !src.ends_with('\n') {
-                        text.push('\n');
-                    }
-                    text.push_str("```\n");
-                }
-                None => {
-                    text.push_str(
-                        "  (no source available — re-index with annotate=true to enable)\n",
-                    );
-                }
+        // No node is named `name` — it may be a struct/enum field or variant.
+        let q = name.to_lowercase();
+        let fmt_field = |f: &crate::types::node::FieldDecl| {
+            let ty = f.type_annotation.as_deref().map(|t| format!(": {t}")).unwrap_or_default();
+            let dv = f.default_value.as_deref().map(|v| format!(" = {v}")).unwrap_or_default();
+            format!("field {}{ty}{dv}", f.name)
+        };
+        let mut hits = String::new();
+        for idx in graph.graph.node_indices() {
+            if q.len() < 2 {
+                break; // too short — would match every field
             }
-            text.push('\n');
-        }
-        if filtered.len() > 5 {
-            text.push_str(&format!("... and {} more matches\n", filtered.len() - 5));
+            let node = &graph.graph[idx];
+            let m = match node {
+                GraphNode::Struct(s) => s.fields.iter().find(|f| f.name.to_lowercase().contains(&q)).map(fmt_field),
+                GraphNode::Class(c) => c.fields.iter().find(|f| f.name.to_lowercase().contains(&q)).map(fmt_field),
+                GraphNode::Enum(e) => e
+                    .variants
+                    .iter()
+                    .find(|v| v.to_lowercase().contains(&q))
+                    .map(|v| format!("variant {v}")),
+                _ => None,
+            };
+            if let Some(m) = m {
+                let (path, line, _) = node.location();
+                hits.push_str(&format!("  [{}] {} ({path}:{line})  ⟶ {m}\n", node.short_label(), node.name()));
+            }
         }
 
+        let text = if hits.is_empty() {
+            format!("No symbol found matching '{name}'")
+        } else {
+            format!("'{name}' is a field/variant (not a standalone symbol). Found on:\n\n{hits}")
+        };
         ToolResult {
             content: vec![ToolContent::text(text)],
             is_error: None,
         }
     })
+}
+
+/// "field name: Type = default" describing a struct/class field.
+fn describe_field(f: &crate::types::node::FieldDecl) -> String {
+    let ty = f.type_annotation.as_deref().map(|t| format!(": {t}")).unwrap_or_default();
+    let dv = f.default_value.as_deref().map(|v| format!(" = {v}")).unwrap_or_default();
+    format!("field {}{ty}{dv}", f.name)
 }
 
 fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) -> ToolResult {
@@ -1707,26 +1662,75 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
         }
     };
     let kind_filter = args.get("kind").and_then(|v| v.as_str());
+    let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(1).clamp(1, 8) as usize;
     let repo = args.get("repository").and_then(|v| v.as_str());
 
+    // Batch: a comma-separated `name` inspects several symbols in ONE call,
+    // collapsing the common "drill into A, then B, then C" chain (each its own
+    // turn that re-sends the whole transcript) into a single response.
+    const MAX_BATCH: usize = 12;
+    let names: Vec<&str> = name
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .take(MAX_BATCH)
+        .collect();
+    if names.is_empty() {
+        return ToolResult {
+            content: vec![ToolContent::text("Provide a symbol name.".into())],
+            is_error: Some(true),
+        };
+    }
+
     with_graph(state, repo, |graph| {
-        let results = graph.search_by_name(name);
-        let filtered: Vec<_> = results
+        let render_one = |name: &str| -> String {
+        let mut filtered: Vec<(petgraph::graph::NodeIndex, &GraphNode)> = graph
+            .search_by_name(name)
             .into_iter()
             .filter(|(_, node)| kind_filter.is_none_or(|k| node.label() == k))
             .collect();
+        // search_by_name is substring; for get_context the caller almost always
+        // means an exact symbol. If any match the name exactly (case-insensitive),
+        // keep only those — so "process" doesn't drag in "preprocess"/"process_file".
+        if filtered.iter().any(|(_, n)| n.name().eq_ignore_ascii_case(name)) {
+            filtered.retain(|(_, n)| n.name().eq_ignore_ascii_case(name));
+        }
+        // Rank the best match first so filtered[0] is the one the caller meant —
+        // this avoids a get_context→get_context(kind=) retry. Order by: real
+        // definitions before import/Module nodes (a `use Foo` creates a Module
+        // node named Foo that would otherwise shadow `struct Foo`), then
+        // production code before test fixtures/examples.
+        filtered.sort_by_key(|(_, n)| (n.label() == "Module", is_secondary_path(&n.location().0)));
+
+        // If `name` is a struct field / enum variant (not a node itself), fall
+        // back to the type that owns it — so "what's the default of X" is answered
+        // in this single call rather than forcing a separate field lookup.
+        let mut prefix = String::new();
+        if filtered.is_empty() && name.len() >= 2 {
+            let q = name.to_lowercase();
+            let owner = graph.graph.node_indices().find_map(|i| {
+                let n = &graph.graph[i];
+                let desc = match n {
+                    GraphNode::Struct(s) => s.fields.iter().find(|f| f.name.to_lowercase().contains(&q)).map(describe_field),
+                    GraphNode::Class(c) => c.fields.iter().find(|f| f.name.to_lowercase().contains(&q)).map(describe_field),
+                    GraphNode::Enum(e) => e.variants.iter().find(|v| v.to_lowercase().contains(&q)).map(|v| format!("variant {v}")),
+                    _ => None,
+                };
+                desc.map(|d| (i, n, d))
+            });
+            if let Some((i, n, d)) = owner {
+                prefix = format!("'{name}' is a {d} of {} — showing that type:\n\n", n.name());
+                filtered.push((i, n));
+            }
+        }
 
         if filtered.is_empty() {
-            return ToolResult {
-                content: vec![ToolContent::text(format!(
-                    "No symbol found matching '{name}'"
-                ))],
-                is_error: None,
-            };
+            return format!("No symbol found matching '{name}'");
         }
 
         let (idx, node) = &filtered[0];
-        let mut text = format!("Context for {} '{name}':\n\n", node.short_label());
+        let mut text = prefix;
+        text.push_str(&format!("Context for {} '{}':\n\n", node.short_label(), node.name()));
 
         // ── Source ──────────────────────────────────────────────────────
         text.push_str("── Definition ──\n");
@@ -1734,9 +1738,26 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
         text.push('\n');
         if let Some(src) = node.source_snippet() {
             text.push_str("```\n");
-            text.push_str(src);
-            if !src.ends_with('\n') {
-                text.push('\n');
+            // Bound long bodies by default: the tail is rarely what a "what is X /
+            // who calls X" question needs, and a big body is re-sent every later
+            // turn. Small/medium functions (the common case) stay whole, so their
+            // accuracy is untouched; the full body is one depth=2 call away.
+            const BODY_LINE_CAP: usize = 35;
+            let total = src.lines().count();
+            if depth == 1 && total > BODY_LINE_CAP {
+                for line in src.lines().take(BODY_LINE_CAP) {
+                    text.push_str(line);
+                    text.push('\n');
+                }
+                text.push_str(&format!(
+                    "… (+{} more lines — pass depth=2 for the full body)\n",
+                    total - BODY_LINE_CAP
+                ));
+            } else {
+                text.push_str(src);
+                if !src.ends_with('\n') {
+                    text.push('\n');
+                }
             }
             text.push_str("```\n");
         } else {
@@ -1772,33 +1793,108 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
         }
         text.push('\n');
 
+        // ── Other references (inherited/implemented/imported/tested by) ──
+        let mut refs: Vec<String> = Vec::new();
+        for (src, kind) in graph.incoming_edges(*idx) {
+            let label = match kind {
+                EdgeKind::Inherits => "inherited by",
+                EdgeKind::Implements => "implemented by",
+                EdgeKind::Imports { .. } => "imported by",
+                EdgeKind::Tests => "tested by",
+                _ => continue,
+            };
+            if let Some(n) = graph.get_node(src) {
+                refs.push(format!("{label} {}", format_node_brief(n)));
+            }
+        }
+        if !refs.is_empty() {
+            text.push_str(&format!("── Other references ({}) ──\n", refs.len()));
+            text.push_str(&format!(
+                "  {}\n\n",
+                refs.iter().take(20).cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+
+        // ── Transitive call chain / blast radius (only when depth > 1) ──────
+        if depth > 1 {
+            let chain = graph.get_call_chain(*idx, depth);
+            text.push_str(&format!("── Call chain (callees, depth {depth}) ({}) ──\n", chain.len()));
+            if chain.is_empty() {
+                text.push_str("  (none)\n");
+            } else {
+                for (_, n, d) in chain.iter().take(40) {
+                    text.push_str(&format!("  {}→ {}\n", "  ".repeat(*d), format_node_brief(n)));
+                }
+                if chain.len() > 40 {
+                    text.push_str(&format!("  ... and {} more\n", chain.len() - 40));
+                }
+            }
+            text.push('\n');
+
+            let radius = graph.get_transitive_callers(*idx, depth);
+            text.push_str(&format!("── Blast radius (transitive callers, depth {depth}) ({}) ──\n", radius.len()));
+            if radius.is_empty() {
+                text.push_str("  (none)\n");
+            } else {
+                let list: Vec<_> = radius.iter().take(40).map(|(_, n, _)| format_node_brief(n)).collect();
+                text.push_str(&format!("  {}\n", list.join(", ")));
+                if radius.len() > 40 {
+                    text.push_str(&format!("  ... and {} more\n", radius.len() - 40));
+                }
+            }
+            text.push('\n');
+        }
+
         // ── Similar nodes ─────────────────────────────────────────────────
+        // Similar code is supplementary, not the core of "what is X", so keep it
+        // cheap by default (count + top 3) and only widen it on the depth>1
+        // deep-dive signal — this is the bulk of get_context's response bloat on
+        // symbols with many look-alikes.
         if graph.has_annotations() {
             let groups = graph.find_similar_nodes(Some(node.label()), 3);
             let my_group = groups.iter().find(|g| g.iter().any(|(i, _)| i == idx));
             if let Some(group) = my_group {
                 let others: Vec<_> = group.iter().filter(|(i, _)| i != idx).collect();
                 if !others.is_empty() {
-                    text.push_str(&format!(
-                        "── Similar code ({} match(es)) ──\n",
-                        others.len()
-                    ));
-                    let list: Vec<_> = others.iter().take(5).map(|(_, n)| format_node_brief(n)).collect();
+                    let show = if depth > 1 { 10 } else { 3 };
+                    text.push_str(&format!("── Similar code ({} match(es)) ──\n", others.len()));
+                    let list: Vec<_> = others.iter().take(show).map(|(_, n)| format_node_brief(n)).collect();
                     text.push_str(&format!("  {}\n", list.join(", ")));
+                    if others.len() > show {
+                        text.push_str("  (pass depth=2 for the full list)\n");
+                    }
                     text.push('\n');
                 }
             }
         }
 
         if filtered.len() > 1 {
+            // List the alternatives (with kind + file) so the model can confirm it
+            // already has the right one, or pick another in a single follow-up —
+            // instead of guessing kind= and re-calling just to see the list.
             text.push_str(&format!(
-                "Note: {} other symbols named '{name}' exist — use kind= to narrow down.\n",
+                "── Other symbols also named '{name}' ({}) ──\n",
                 filtered.len() - 1
             ));
+            for (_, n) in filtered.iter().skip(1).take(8) {
+                text.push_str(&format!("  {}\n", format_node_brief(n)));
+            }
+            if filtered.len() - 1 > 8 {
+                text.push_str(&format!("  ... and {} more\n", filtered.len() - 1 - 8));
+            }
+            text.push_str("  (full context shown above is the first match; re-call with kind= to pick another)\n");
         }
 
+        text
+        };
+
+        let body = names
+            .iter()
+            .map(|n| render_one(n))
+            .collect::<Vec<_>>()
+            .join("\n\n────────────────────\n\n");
         ToolResult {
-            content: vec![ToolContent::text(text)],
+            content: vec![ToolContent::text(body)],
             is_error: None,
         }
     })
@@ -1999,6 +2095,29 @@ fn handle_get_module_overview(state: &SharedState, args: &serde_json::Value) -> 
             total_lines, total_public
         ));
 
+        // Most complex functions in this module (folded from find_complex_functions).
+        let mut complex: Vec<(&str, u32, String, usize)> = Vec::new();
+        for (file_idx, _) in &files {
+            for (_, child) in graph.get_children(*file_idx) {
+                if let GraphNode::Function(f) = child {
+                    complex.push((
+                        f.name.as_str(),
+                        f.cyclomatic_complexity,
+                        f.path.display().to_string(),
+                        f.span.start_line as usize,
+                    ));
+                }
+            }
+        }
+        complex.sort_by(|a, b| b.1.cmp(&a.1));
+        if !complex.is_empty() {
+            text.push_str("── Most complex functions ──\n");
+            for (name, cc, path, line) in complex.iter().take(8) {
+                text.push_str(&format!("  cc={cc:<3} {name} ({path}:{line})\n"));
+            }
+            text.push('\n');
+        }
+
         // Cross-file call relationships within the module
         let mut internal_calls: Vec<(String, String)> = Vec::new();
         let mut external_deps: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -2155,13 +2274,32 @@ fn ensure_gitignore(root: &std::path::Path) {
 
 // ── formatting helpers ───────────────────────────────────────────────────
 
+/// A compact signature skeleton for a function: `[async] name(arg: type, …) -> ret`.
+/// This is the high-value "signatures, bodies elided" primitive — built from data
+/// we already parse (args/arg_types/return_type), shown wherever a function is
+/// rendered so the outline answers "what's the shape of X" without the body.
+fn fn_signature(f: &crate::types::node::FunctionData) -> String {
+    let params: Vec<String> = f
+        .args
+        .iter()
+        .enumerate()
+        .map(|(i, a)| match f.arg_types.get(i).and_then(|t| t.as_deref()) {
+            Some(ty) => format!("{a}: {ty}"),
+            None => a.clone(),
+        })
+        .collect();
+    let ret = f.return_type.as_deref().map(|r| format!(" -> {r}")).unwrap_or_default();
+    let asyncp = if f.is_async { "async " } else { "" };
+    format!("{asyncp}{}({}){ret}", f.name, params.join(", "))
+}
+
 fn format_node(node: &GraphNode) -> String {
     let sl = node.short_label();
     match node {
         GraphNode::Function(f) => {
             format!(
                 "  [{sl}] {} ({}:{}–{}, cc={})",
-                f.name, f.path.display(), f.span.start_line, f.span.end_line, f.cyclomatic_complexity,
+                fn_signature(f), f.path.display(), f.span.start_line, f.span.end_line, f.cyclomatic_complexity,
             )
         }
         GraphNode::Class(c) => {
@@ -2182,10 +2320,33 @@ fn format_node(node: &GraphNode) -> String {
             format!("  [{sl}] {} ({}:{}–{})", i.name, i.path.display(), i.span.start_line, i.span.end_line)
         }
         GraphNode::Enum(e) => {
-            format!("  [{sl}] {} [{}] ({}:{}–{})", e.name, e.variants.join(", "), e.path.display(), e.span.start_line, e.span.end_line)
+            // Cap variant display — some generated enums have hundreds of variants.
+            const MAX_VARIANTS: usize = 16;
+            let vars = if e.variants.len() > MAX_VARIANTS {
+                format!("{}, …(+{} more)", e.variants[..MAX_VARIANTS].join(", "), e.variants.len() - MAX_VARIANTS)
+            } else {
+                e.variants.join(", ")
+            };
+            format!("  [{sl}] {} [{}] ({}:{}–{})", e.name, vars, e.path.display(), e.span.start_line, e.span.end_line)
         }
         GraphNode::Variable(v) => {
-            format!("  [{sl}] {} ({}:{})", v.name, v.path.display(), v.line_number)
+            let ty = v.type_annotation.as_deref().map(|t| format!(": {t}")).unwrap_or_default();
+            // Collapse multi-line values to one line and elide long ones — a const's
+            // full array/literal is body, not skeleton (e.g. a 18-element list).
+            let val = v
+                .value
+                .as_deref()
+                .map(|x| {
+                    let collapsed = x.split_whitespace().collect::<Vec<_>>().join(" ");
+                    let shown: String = collapsed.chars().take(60).collect();
+                    if collapsed.chars().count() > 60 {
+                        format!(" = {shown}…")
+                    } else {
+                        format!(" = {shown}")
+                    }
+                })
+                .unwrap_or_default();
+            format!("  [{sl}] {}{}{} ({}:{})", v.name, ty, val, v.path.display(), v.line_number)
         }
         GraphNode::Module(m) => {
             format!("  [{sl}] {}", m.name)

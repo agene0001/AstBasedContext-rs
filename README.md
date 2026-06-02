@@ -12,6 +12,61 @@ Supports **13 languages**: Python, Rust, TypeScript, JavaScript, Go, Java, C, C+
 4. Builds a directed graph linking everything together
 5. Exposes the graph via a CLI or an MCP server so LLMs can query it
 
+## Does it actually save tokens?
+
+The whole premise is that an LLM can answer questions about a codebase using **fewer tokens** through the code graph than by reading files with `grep` / `read_file` — *without losing accuracy*. That claim is measurable, so we measure it. The eval (`eval/`) has the **same agent answer each question twice**: once with only `read_file` / `grep` / `list_dir`, once with the ast_context MCP tools. It compares total tokens (from the model's own usage metadata) and correctness.
+
+**Headline** — `gemini-3.1-pro-preview`, a 9-task suite, two runs:
+
+| Run | ast_context tokens vs grep | Accuracy (ast vs grep) |
+|-----|:--------------------------:|:----------------------:|
+| 1   | **52%**                    | 9/9 vs 8/9             |
+| 2   | **77%**                    | 8/9 vs 8/9             |
+
+ast_context answered with roughly half to three-quarters of the tokens, at **equal-or-better accuracy**. The exact percentage shifts run to run and model to model — the agent makes slightly different tool choices each time — but it lands **below 100% in the large majority of cases**.
+
+### Per-task breakdown (average of the two runs)
+
+| Task (what it asks) | grep tokens | ast tokens | ast ÷ grep |
+|---|--:|--:|:--:|
+| *Cross-file / whole-repo questions* | | | |
+| cache-version — format version + what happens on mismatch | 47,867 | 12,564 | **26%** |
+| top-redundancy — biggest consolidation opportunity | 56,976 | 15,620 | **27%** ¹ |
+| confirm-threshold — what a config field controls + default | 14,317 | 7,222 | **50%** |
+| languages — how many languages, name three | 12,292 | 7,389 | **60%** |
+| core-symbols — what are the core pieces of the codebase | 103,536 | 72,534 | **70%** |
+| dead-code-filter — which functions the dead-code check skips | 7,485 | 6,401 | **86%** |
+| *Pinpoint lookups (answer lives in one small file/symbol)* | | | |
+| idf-location — which function computes IDF, in which file | 3,283 | 3,752 | 114% |
+| enum-opportunity — where would an enum fit | 32,078 | 35,614 | 111% |
+| passthrough-walker — is there a passthrough in `walker.rs` | 3,206 | 16,376 | 511% |
+
+¹ The grep arm **failed** `top-redundancy` both runs (vague answer); ast_context passed both — cheaper *and* correct where file-reading wasn't.
+
+**Read the pattern, not any single number:**
+
+- The advantage **grows with how cross-cutting the question is.** Whole-repo / multi-file comprehension runs ~2–4× cheaper.
+- It **ties or loses on "the answer is in one small file"** lookups. `passthrough-walker` (just read `walker.rs`, 116 lines) is the clear case where a one-line `grep` is simply cheaper — ast_context is a *synthesis* aid, not a replacement for trivial lookups.
+- The numbers are **noisy because both arms are agent-driven**: the grep arm's `enum-opportunity` cost swung 5× between the two runs depending on how many files the agent chose to read. Treat the table as ranges, not exact figures — and expect the percentage to differ on your codebase and model.
+
+### Run the benchmark yourself
+
+The eval is **not** run by CI (it calls a paid LLM API). To reproduce the table above:
+
+```sh
+cargo build --release                 # build the binary the MCP arm drives
+export GEMINI_API_KEY=...              # from https://aistudio.google.com/apikey
+cd eval && ./run.sh                    # runs all tasks, prints the per-task table
+# ...or a subset:
+./run.sh cache-version top-redundancy
+```
+
+See [`eval/README.md`](eval/README.md) for model selection (`GEMINI_MODEL`), the LLM-as-judge tasks, and adding your own. The task set is intentionally small and easy to extend — drop questions about *your* codebase into `eval/tasks.json` and run it.
+
+### Bonus: it finds refactors that shrink your codebase
+
+`analyze_redundancy` surfaces real consolidation opportunities — duplicated functions, passthrough wrappers, repeated boilerplate. We dogfooded it on this repo: it flagged that all 13 language parsers carried an identical `make_parser` method and repeated the same tree-sitter match-walk boilerplate across ~60 `find_*` methods. Acting on those findings, we extracted two shared helpers (`build_parser`, `for_each_capture`) and **removed ~586 lines of duplicated code** (15 files, +342 / −928) with no behavior change. The tool that measures comprehension cost also pays for itself in cleanup.
+
 ## Installation
 
 ```
@@ -113,7 +168,7 @@ ast_context complexity --graph graph.json --limit 20
 
 ### Find similar/redundant code
 
-Requires `--annotate` during indexing. Finds groups of structurally similar nodes based on token overlap and line count similarity.
+Requires `--annotate` during indexing. Finds groups of structurally similar nodes by re-parsing each snippet with tree-sitter and comparing **AST shape** (IDF-weighted so common grammar productions don't create false matches). Because it compares structure rather than identifier names, it catches code that does the same thing even when every variable is named differently. Falls back to lexical token overlap for snippets it can't parse.
 
 ```
 # Find similar functions (great for finding consolidation opportunities)

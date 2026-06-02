@@ -248,6 +248,13 @@ pub(super) fn find_near_duplicates(
                 if should_skip_near_duplicate(&annotated[i].5, &annotated[j].5) {
                     continue;
                 }
+                // Structural confirmation: drop matches whose AST shape disagrees
+                // (similar vocabulary but different structure → not a duplicate).
+                if let Some(cos) = ctx.structural_cosine(annotated[i].0, annotated[j].0) {
+                    if cos < ctx.config.structural_confirm_threshold {
+                        continue;
+                    }
+                }
                 group.push(j);
                 used[j] = true;
             }
@@ -325,6 +332,13 @@ pub(super) fn find_structural_similar(
             if sim >= ctx.config.structural_threshold && sim < ctx.config.near_duplicate_threshold {
                 if should_skip_near_duplicate(&annotated[i].4, &annotated[j].4) {
                     continue;
+                }
+                // Structural confirmation: require the syntax trees to actually
+                // agree, not just the identifier vocabulary.
+                if let Some(cos) = ctx.structural_cosine(annotated[i].0, annotated[j].0) {
+                    if cos < ctx.config.structural_confirm_threshold {
+                        continue;
+                    }
                 }
                 group.push(j);
                 used[j] = true;

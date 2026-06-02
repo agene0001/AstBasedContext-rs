@@ -1,4 +1,46 @@
-use tree_sitter::Node;
+use streaming_iterator::StreamingIterator;
+use tree_sitter::{Language as TsLanguage, Node, Parser, Query, QueryCursor};
+
+/// Build a tree-sitter `Parser` configured for a language grammar. Shared by
+/// every `LanguageParser` implementation — previously each parser carried an
+/// identical `make_parser` method (flagged at 100% near-duplicate across 13
+/// parsers by this crate's own redundancy analysis).
+pub fn build_parser(ts_language: &TsLanguage) -> Parser {
+    let mut parser = Parser::new();
+    parser
+        .set_language(ts_language)
+        .expect("tree-sitter language grammar must load");
+    parser
+}
+
+/// Run `query` over `root` and call `f` with every node captured under the name
+/// `capture`. Encapsulates the tree-sitter 0.26 StreamingIterator match-walk
+/// (`advance`/`get` + capture-index filtering) that every parser's `find_*`
+/// method otherwise repeats by hand — the exact boilerplate CLAUDE.md warns is
+/// easy to get wrong. Returns early (no-op) if the capture name isn't in the query.
+pub fn for_each_capture<F: FnMut(Node)>(
+    cursor: &mut QueryCursor,
+    query: &Query,
+    capture: &str,
+    root: Node,
+    source: &[u8],
+    mut f: F,
+) {
+    let Some(idx) = query.capture_index_for_name(capture) else {
+        return;
+    };
+    let mut matches = cursor.matches(query, root, source);
+    while let Some(m) = {
+        matches.advance();
+        matches.get()
+    } {
+        for cap in m.captures {
+            if cap.index == idx {
+                f(cap.node);
+            }
+        }
+    }
+}
 
 /// Extract the text of a tree-sitter node from the source bytes.
 pub fn get_node_text<'a>(node: &Node, source: &'a [u8]) -> &'a str {

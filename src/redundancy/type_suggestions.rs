@@ -29,86 +29,93 @@ pub(super) fn suggest_parameter_structs(
         })
         .collect();
 
-    // Group ctx.functions by their parameter set (using a sorted param key)
-    let mut param_groups: HashMap<Vec<String>, Vec<(NodeIndex, &str)>> = HashMap::new();
-    for &(idx, name, args) in &candidates {
-        let mut key: Vec<String> = args.to_vec();
-        key.sort();
-        param_groups.entry(key).or_default().push((idx, name));
+    // Cluster functions that share 4+ params (transitively) into connected
+    // components, and emit ONE finding per component — not one per pair. A flat
+    // pairwise pass explodes O(N²): e.g. ~50 trait methods all sharing
+    // (&self, source, root, cursor) would otherwise produce ~1200 findings for
+    // what is a single "these share a param signature" observation.
+    let param_sets: Vec<HashSet<&str>> = candidates
+        .iter()
+        .map(|(_, _, params)| params.iter().map(|s| s.as_str()).collect())
+        .collect();
+
+    let mut uf = UnionFind::new(candidates.len());
+    for i in 0..candidates.len() {
+        for j in (i + 1)..candidates.len() {
+            if param_sets[i].intersection(&param_sets[j]).count() >= 4 {
+                uf.union(i, j);
+            }
+        }
     }
 
-    for (params, group) in &param_groups {
-        if group.len() < 2 || params.len() < 4 {
+    let mut components: HashMap<usize, Vec<usize>> = HashMap::new();
+    for i in 0..candidates.len() {
+        components.entry(uf.find(i)).or_default().push(i);
+    }
+
+    for members in components.values() {
+        if members.len() < 2 {
+            continue;
+        }
+        // The struct should hold exactly the params common to ALL members. If the
+        // component is only loosely connected (transitive links with no shared
+        // core of 4+), it isn't a single coherent struct suggestion — skip it.
+        let mut common: HashSet<&str> = param_sets[members[0]].clone();
+        for &m in &members[1..] {
+            common = common.intersection(&param_sets[m]).copied().collect();
+        }
+        if common.len() < 4 {
             continue;
         }
 
-        let names: Vec<String> = group.iter().map(|(_, n)| n.to_string()).collect();
-        let indices: Vec<usize> = group.iter().map(|(idx, _)| idx.index()).collect();
+        let mut params: Vec<String> = common.iter().map(|s| s.to_string()).collect();
+        params.sort();
+        let names: Vec<String> = members.iter().map(|&m| candidates[m].1.to_string()).collect();
+        let indices: Vec<usize> = members.iter().map(|&m| candidates[m].0.index()).collect();
+
+        // Keep the description compact: name a few, count the rest (the full list
+        // is in node_indices, rendered as the └─ line).
+        let subject = if names.len() <= 4 {
+            names.join(", ")
+        } else {
+            format!("{} and {} more functions", names[..3].join(", "), names.len() - 3)
+        };
 
         findings.push(Finding {
             tier: if params.len() >= 5 { Tier::Medium } else { Tier::Low },
             kind: FindingKind::SuggestParameterStruct {
-                function_names: names.clone(),
+                function_names: names,
                 shared_params: params.clone(),
             },
             node_indices: indices,
             description: format!(
-                "{} share {} params ({}) — group into a config struct.",
-                names.join(", "),
+                "{subject} share {} params ({}) — group into a config struct.",
                 params.len(),
                 params.join(", "),
             ),
         });
     }
+}
 
-    // Also check for partial overlap: ctx.functions sharing 4+ params even if they have different extras
-    // Pre-compute param sets to avoid per-pair allocation
-    let param_sets: Vec<HashSet<&str>> = candidates.iter()
-        .map(|(_, _, params)| params.iter().map(|s| s.as_str()).collect())
-        .collect();
-    let mut checked_pairs: HashSet<(usize, usize)> = HashSet::new();
-    for i in 0..candidates.len() {
-        let params_a = &param_sets[i];
-        for j in (i + 1)..candidates.len() {
-            if checked_pairs.contains(&(i, j)) {
-                continue;
-            }
-            let params_b = &param_sets[j];
-            let shared: Vec<&str> = params_a.intersection(params_b).copied().collect();
+/// Minimal union-find for clustering functions by shared-parameter relations.
+struct UnionFind {
+    parent: Vec<usize>,
+}
 
-            if shared.len() >= 4 {
-                checked_pairs.insert((i, j));
-                let names = vec![
-                    candidates[i].1.to_string(),
-                    candidates[j].1.to_string(),
-                ];
-                // Skip if already caught by exact-match grouping above
-                let mut key_a: Vec<String> = candidates[i].2.to_vec();
-                key_a.sort();
-                let mut key_b: Vec<String> = candidates[j].2.to_vec();
-                key_b.sort();
-                if key_a == key_b {
-                    continue;
-                }
-
-                let shared_params: Vec<String> = shared.iter().map(|s| s.to_string()).collect();
-                let indices = vec![candidates[i].0.index(), candidates[j].0.index()];
-
-                findings.push(Finding {
-                    tier: Tier::Low,
-                    kind: FindingKind::SuggestParameterStruct {
-                        function_names: names.clone(),
-                        shared_params: shared_params.clone(),
-                    },
-                    node_indices: indices,
-                    description: format!(
-                        "{} share {} params ({}) — group into a struct.",
-                        names.join(" and "),
-                        shared_params.len(),
-                        shared_params.join(", "),
-                    ),
-                });
-            }
+impl UnionFind {
+    fn new(n: usize) -> Self {
+        Self { parent: (0..n).collect() }
+    }
+    fn find(&mut self, x: usize) -> usize {
+        if self.parent[x] != x {
+            self.parent[x] = self.find(self.parent[x]);
+        }
+        self.parent[x]
+    }
+    fn union(&mut self, a: usize, b: usize) {
+        let (ra, rb) = (self.find(a), self.find(b));
+        if ra != rb {
+            self.parent[ra] = rb;
         }
     }
 }
@@ -301,7 +308,8 @@ pub(super) fn suggest_trait_extraction(
                 continue;
             }
 
-            let shared_methods: Vec<String> = common.iter().map(|s| s.to_string()).collect();
+            let mut shared_methods: Vec<String> = common.iter().map(|s| s.to_string()).collect();
+            shared_methods.sort(); // HashSet order is randomized — sort for determinism
             let names: Vec<String> = group
                 .iter()
                 .map(|&g| types_with_methods[g].1.to_string())

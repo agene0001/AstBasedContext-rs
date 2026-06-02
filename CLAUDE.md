@@ -86,7 +86,7 @@ When `GraphBuilder::build_with_options(path, true)` is called, the `annotate` mo
 - All span-based node types get `source: Option<String>` (Function, Class, Struct, Trait, Interface, Enum, Macro)
 - Snippets are truncated at 4KB per node
 - `GraphNode::source_snippet()` accessor returns `Option<&str>`
-- The `find_similar_nodes()` query uses Jaccard token similarity + line count ratio to group potentially redundant nodes
+- The `find_similar_nodes()` query groups potentially redundant nodes by **structural** AST-shape similarity: it re-parses each snippet with tree-sitter (`graph/structural.rs`), builds an IDF-weighted histogram of grammar productions, and compares with weighted cosine. Falls back to Jaccard token overlap when a snippet can't be parsed. Raw grammars are obtained via `parser::ts_language()`.
 - `redundancy.rs` provides tiered analysis across 132 checks in 18 categories
 - 132 check types across `FindingKind` enum, each assigned a `Tier` (Critical/High/Medium/Low)
 - Checks 1-5: function-level redundancy (passthrough, near-duplicate, similar, merge, split)

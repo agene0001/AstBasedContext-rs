@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Language as TsLanguage, Node, Parser, Query, QueryCursor};
+use tree_sitter::{Language as TsLanguage, Node, Query, QueryCursor};
 
 use crate::error::{Error, Result};
 use crate::types::node::*;
@@ -110,26 +110,10 @@ impl CSharpParser {
         }
     }
 
-    fn make_parser(&self) -> Parser {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&self.ts_language)
-            .expect("C# language must load");
-        parser
-    }
-
     fn find_functions(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<FunctionData> {
         let mut functions = Vec::new();
-        let Some(name_idx) = self.queries.functions.capture_index_for_name("name") else { return functions; };
-
-        let mut matches = cursor.matches(&self.queries.functions, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(func_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.functions, "name", *root, source, |node| {
+                let Some(func_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 let params_node = func_node.child_by_field_name("parameters");
@@ -197,23 +181,14 @@ impl CSharpParser {
                     raises: vec![],
                     has_error_handling: false,
                 });
-            }
-        }
+        });
         functions
     }
 
     fn find_classes(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<ClassData> {
         let mut classes = Vec::new();
-        let Some(name_idx) = self.queries.classes.capture_index_for_name("name") else { return classes; };
-
-        let mut matches = cursor.matches(&self.queries.classes, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(class_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.classes, "name", *root, source, |node| {
+                let Some(class_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 let mut bases = Vec::new();
@@ -259,23 +234,14 @@ impl CSharpParser {
                     source: None,
                     docstring: None,
                 });
-            }
-        }
+        });
         classes
     }
 
     fn find_imports(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<ImportData> {
         let mut imports = Vec::new();
         let mut seen = HashSet::new();
-        let Some(import_idx) = self.queries.imports.capture_index_for_name("import") else { return imports; };
-
-        let mut matches = cursor.matches(&self.queries.imports, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != import_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.imports, "import", *root, source, |node| {
                 let text = get_node_text(&node, source).to_string();
 
                 // Strip "using " prefix and trailing ";"
@@ -288,7 +254,7 @@ impl CSharpParser {
                     .to_string();
 
                 if seen.contains(&clean) {
-                    continue;
+                    return;
                 }
                 seen.insert(clean.clone());
 
@@ -306,8 +272,7 @@ impl CSharpParser {
                     language: Language::CSharp,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         imports
     }
 
@@ -356,15 +321,7 @@ impl CSharpParser {
 
     fn find_variables(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<VariableData> {
         let mut variables = Vec::new();
-        let Some(name_idx) = self.queries.variables.capture_index_for_name("name") else { return variables; };
-
-        let mut matches = cursor.matches(&self.queries.variables, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.variables, "name", *root, source, |node| {
                 let name = get_node_text(&node, source).to_string();
 
                 let declarator = node.parent();
@@ -399,23 +356,14 @@ impl CSharpParser {
                     language: Language::CSharp,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         variables
     }
 
     pub fn find_structs(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<StructData> {
         let mut structs = Vec::new();
-        let Some(name_idx) = self.queries.structs.capture_index_for_name("name") else { return structs; };
-
-        let mut matches = cursor.matches(&self.queries.structs, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(struct_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.structs, "name", *root, source, |node| {
+                let Some(struct_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 structs.push(StructData {
@@ -432,23 +380,14 @@ impl CSharpParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         structs
     }
 
     pub fn find_enums(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<EnumData> {
         let mut enums = Vec::new();
-        let Some(name_idx) = self.queries.enums.capture_index_for_name("name") else { return enums; };
-
-        let mut matches = cursor.matches(&self.queries.enums, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(enum_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.enums, "name", *root, source, |node| {
+                let Some(enum_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 enums.push(EnumData {
@@ -465,23 +404,14 @@ impl CSharpParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         enums
     }
 
     pub fn find_interfaces(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<InterfaceData> {
         let mut interfaces = Vec::new();
-        let Some(name_idx) = self.queries.interfaces.capture_index_for_name("name") else { return interfaces; };
-
-        let mut matches = cursor.matches(&self.queries.interfaces, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(iface_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.interfaces, "name", *root, source, |node| {
+                let Some(iface_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 interfaces.push(InterfaceData {
@@ -498,8 +428,7 @@ impl CSharpParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         interfaces
     }
 }
@@ -510,7 +439,7 @@ impl LanguageParser for CSharpParser {
     }
 
     fn parse(&self, path: &Path, source: &[u8], is_dependency: bool) -> Result<FileParseResult> {
-        let mut parser = self.make_parser();
+        let mut parser = build_parser(&self.ts_language);
         let tree = parser.parse(source, None).ok_or_else(|| Error::Parse {
             path: path.to_path_buf(),
             message: "tree-sitter failed to parse".into(),

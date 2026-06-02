@@ -1,0 +1,56 @@
+[
+  {
+    "id": "idf-location",
+    "question": "Which function computes the IDF weights used in structural similarity, and which source file defines it?",
+    "expect_all": ["idf_weights"],
+    "expect_any": ["structural.rs", "graph/structural"]
+  },
+  {
+    "id": "dead-code-filter",
+    "question": "The dead-code detector deliberately skips some functions that have no callers so they aren't reported as dead. Name two kinds of functions it excludes.",
+    "expect_all": [],
+    "expect_any": ["test", "trait", "interface", "entry point", "main"]
+  },
+  {
+    "id": "confirm-threshold",
+    "question": "What does the structural_confirm_threshold setting control, and what is its default value?",
+    "expect_all": ["0.5"],
+    "expect_any": ["false positive", "near-duplicate", "near duplicate", "structural", "confirm"]
+  },
+  {
+    "id": "languages",
+    "question": "How many programming languages does this tool's parser support, and name three of them?",
+    "expect_all": [],
+    "expect_any": ["13", "python", "rust", "typescript", "go", "java"]
+  },
+  {
+    "id": "cache-version",
+    "question": "What graph file format version does the tool currently expect, and what happens when a cache from an older version is loaded?",
+    "expect_all": ["3"],
+    "expect_any": ["re-index", "reindex", "re index", "rejected", "mismatch", "regenerate"]
+  },
+  {
+    "id": "passthrough-walker",
+    "question": "Is there an unnecessary passthrough/delegation chain in the file-discovery (directory walking) code? Name the functions involved.",
+    "expect_all": [],
+    "expect_any": ["walk_source_files_full", "walk_source_files_with_excludes", "passthrough", "delegat"]
+  },
+  {
+    "id": "enum-opportunity",
+    "judge": true,
+    "question": "Identify one place in this codebase that would be clearer or safer as an enum / sum type than its current representation, and say specifically where.",
+    "rubric": "PASS if the answer names a SPECIFIC type, field, function, or value in this codebase (by name) and explains why an enum/sum type would represent it better than the current form (e.g. a string or integer used as a tag/kind, a set of related booleans, or stringly-typed state). FAIL if it is vague, names no concrete location, or invents symbols that don't plausibly exist."
+  },
+  {
+    "id": "top-redundancy",
+    "judge": true,
+    "question": "What is the most significant code-duplication or consolidation opportunity in this codebase? Name the specific functions or types involved.",
+    "rubric": "PASS if the answer names SPECIFIC functions or types (by name) that are duplicated, near-duplicate, or a passthrough/delegation that could be consolidated, with enough detail that a developer could act on it. FAIL if it gives only generic advice with no named symbols."
+  },
+  {
+    "id": "core-symbols",
+    "judge": true,
+    "question": "What are the most important / central functions or types in this codebase — the ones a new contributor should understand first? Name specific symbols.",
+    "rubric": "PASS if the answer names SPECIFIC, genuinely central symbols by name (e.g. the graph builder such as GraphBuilder / build_with_options / build_full_with_options, the CodeGraph type, the parser dispatch / LanguageParser trait, the MCP server or tool dispatch, or the CLI entry point) — symbols that are architecturally load-bearing, not peripheral leaf helpers. FAIL if it is vague, names only trivial utilities, or invents symbols that do not exist."
+  }
+]

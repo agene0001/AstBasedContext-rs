@@ -75,7 +75,11 @@ pub(super) fn suggest_facade(
                     internal_functions_called: internal_called,
                     external_caller_count: external_count,
                 },
-                node_indices: internal_functions_called.iter().map(|i| i.index()).collect(),
+                node_indices: {
+                    let mut v: Vec<usize> = internal_functions_called.iter().map(|i| i.index()).collect();
+                    v.sort_unstable(); // HashSet order is randomized — sort for determinism
+                    v
+                },
                 description: format!(
                     "`{}`: {} internal functions called by {} external callers — add a facade.",
                     module_name, internal_called, external_count,
@@ -388,11 +392,12 @@ pub(super) fn suggest_template_method(
         }
 
         // "Hook methods" are those overridden by ALL subclasses
-        let hook_methods: Vec<String> = override_counts
+        let mut hook_methods: Vec<String> = override_counts
             .iter()
             .filter(|(_, count)| **count == subclasses.len())
             .map(|(name, _)| name.clone())
             .collect();
+        hook_methods.sort(); // HashMap order is randomized — sort for determinism
 
         if hook_methods.len() >= 2 {
             findings.push(Finding {

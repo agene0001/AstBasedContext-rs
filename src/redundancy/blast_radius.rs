@@ -98,10 +98,11 @@ pub(super) fn detect_misplaced_functions(
 
         let own_count = file_interactions.get(&own_file).copied().unwrap_or(0);
 
-        // Find the file with the most interactions (excluding own file)
+        // Find the file with the most interactions (excluding own file). Tie-break
+        // on the smaller file name so ties don't resolve by randomized HashMap order.
         let max_other = file_interactions.iter()
             .filter(|(f, _)| **f != own_file)
-            .max_by_key(|(_, &count)| count);
+            .max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0)));
 
         if let Some((other_file, &count)) = max_other {
             if count > own_count && count >= 3 {

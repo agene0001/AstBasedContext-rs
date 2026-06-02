@@ -256,24 +256,27 @@ pub(super) fn detect_repeated_map_lookup(
             }
         }
 
-        // Report any lookup appearing 3+ times
-        for (key, count) in &lookup_counts {
-            if *count >= 3 {
-                findings.push(Finding {
-                    tier: Tier::Low,
-                    kind: FindingKind::RepeatedMapLookup {
-                        function_name: func.name.clone(),
-                        key_hint: key.clone(),
-                        count: *count,
-                    },
-                    node_indices: vec![idx.index()],
-                    description: format!(
-                        "`{}`: `{}` looked up {} times — cache in a local variable.",
-                        func.name, key, count,
-                    ),
-                });
-                break; // one per function
-            }
+        // Report the most-repeated lookup (3+), one per function. Pick
+        // deterministically (highest count, then smaller key) — the HashMap's
+        // iteration order is randomized, so taking the first would vary per run.
+        if let Some((key, count)) = lookup_counts
+            .iter()
+            .filter(|(_, c)| **c >= 3)
+            .max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0)))
+        {
+            findings.push(Finding {
+                tier: Tier::Low,
+                kind: FindingKind::RepeatedMapLookup {
+                    function_name: func.name.clone(),
+                    key_hint: key.clone(),
+                    count: *count,
+                },
+                node_indices: vec![idx.index()],
+                description: format!(
+                    "`{}`: `{}` looked up {} times — cache in a local variable.",
+                    func.name, key, count,
+                ),
+            });
         }
     }
 }
@@ -1189,26 +1192,28 @@ pub(super) fn detect_memoization_candidate(
             }
         }
 
-        // Report calls that appear 3+ times with identical args
-        for (call, count) in &call_counts {
-            if *count >= 3 {
-                // Extract the function name part
-                let callee = call.split('(').next().unwrap_or(call);
-                findings.push(Finding {
-                    tier: Tier::Low,
-                    kind: FindingKind::MemoizationCandidate {
-                        function_name: func.name.clone(),
-                        callee: callee.to_string(),
-                        repeat_count: *count,
-                    },
-                    node_indices: vec![idx.index()],
-                    description: format!(
-                        "`{}`: `{}` called {} times with identical args — cache the result in a local variable.",
-                        func.name, callee, count,
-                    ),
-                });
-                break; // one per function
-            }
+        // Report the most-repeated call (3+ identical-arg calls), one per function.
+        // Pick deterministically (highest count, then smaller name) — iterating the
+        // HashMap and taking the first would vary by randomized iteration order.
+        if let Some((call, count)) = call_counts
+            .iter()
+            .filter(|(_, c)| **c >= 3)
+            .max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0)))
+        {
+            let callee = call.split('(').next().unwrap_or(call);
+            findings.push(Finding {
+                tier: Tier::Low,
+                kind: FindingKind::MemoizationCandidate {
+                    function_name: func.name.clone(),
+                    callee: callee.to_string(),
+                    repeat_count: *count,
+                },
+                node_indices: vec![idx.index()],
+                description: format!(
+                    "`{}`: `{}` called {} times with identical args — cache the result in a local variable.",
+                    func.name, callee, count,
+                ),
+            });
         }
     }
 }

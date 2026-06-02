@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Language as TsLanguage, Node, Parser, Query, QueryCursor};
+use tree_sitter::{Language as TsLanguage, Node, Query, QueryCursor};
 
 use crate::error::{Error, Result};
 use crate::types::node::*;
@@ -93,26 +93,10 @@ impl RubyParser {
         }
     }
 
-    fn make_parser(&self) -> Parser {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&self.ts_language)
-            .expect("Ruby language must load");
-        parser
-    }
-
     fn find_functions(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<FunctionData> {
         let mut functions = Vec::new();
-        let Some(name_idx) = self.queries.functions.capture_index_for_name("name") else { return functions; };
-
-        let mut matches = cursor.matches(&self.queries.functions, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(func_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.functions, "name", *root, source, |node| {
+                let Some(func_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 let params_node = func_node.child_by_field_name("parameters");
@@ -162,23 +146,14 @@ impl RubyParser {
                     raises: vec![],
                     has_error_handling: false,
                 });
-            }
-        }
+        });
         functions
     }
 
     fn find_classes(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<ClassData> {
         let mut classes = Vec::new();
-        let Some(name_idx) = self.queries.classes.capture_index_for_name("name") else { return classes; };
-
-        let mut matches = cursor.matches(&self.queries.classes, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(class_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.classes, "name", *root, source, |node| {
+                let Some(class_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 let mut bases = Vec::new();
@@ -212,32 +187,23 @@ impl RubyParser {
                     source: None,
                     docstring: None,
                 });
-            }
-        }
+        });
         classes
     }
 
     fn find_imports(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<ImportData> {
         let mut imports = Vec::new();
         let mut seen = HashSet::new();
-        let Some(import_idx) = self.queries.imports.capture_index_for_name("import") else { return imports; };
-
-        let mut matches = cursor.matches(&self.queries.imports, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != import_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.imports, "import", *root, source, |node| {
 
                 // Extract the string argument from the argument_list
                 let clean = extract_ruby_require_path(&node, source);
                 if clean.is_empty() {
-                    continue;
+                    return;
                 }
 
                 if seen.contains(&clean) {
-                    continue;
+                    return;
                 }
                 seen.insert(clean.clone());
 
@@ -255,8 +221,7 @@ impl RubyParser {
                     language: Language::Ruby,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         imports
     }
 
@@ -305,15 +270,7 @@ impl RubyParser {
 
     fn find_variables(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<VariableData> {
         let mut variables = Vec::new();
-        let Some(name_idx) = self.queries.variables.capture_index_for_name("name") else { return variables; };
-
-        let mut matches = cursor.matches(&self.queries.variables, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.variables, "name", *root, source, |node| {
                 let name = get_node_text(&node, source).to_string();
 
                 let assignment = node.parent();
@@ -344,8 +301,7 @@ impl RubyParser {
                     language: Language::Ruby,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         variables
     }
 }
@@ -356,7 +312,7 @@ impl LanguageParser for RubyParser {
     }
 
     fn parse(&self, path: &Path, source: &[u8], is_dependency: bool) -> Result<FileParseResult> {
-        let mut parser = self.make_parser();
+        let mut parser = build_parser(&self.ts_language);
         let tree = parser.parse(source, None).ok_or_else(|| Error::Parse {
             path: path.to_path_buf(),
             message: "tree-sitter failed to parse".into(),

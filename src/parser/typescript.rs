@@ -100,12 +100,6 @@ impl TypeScriptParser {
         Self { ts_language, queries }
     }
 
-    fn make_parser(&self) -> Parser {
-        let mut parser = Parser::new();
-        parser.set_language(&self.ts_language).expect("TS language must load");
-        parser
-    }
-
     fn find_functions(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<FunctionData> {
         let mut functions = Vec::new();
         let Some(name_idx) = self.queries.functions.capture_index_for_name("name") else { return functions; };
@@ -295,13 +289,7 @@ impl TypeScriptParser {
 
     fn find_imports(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<ImportData> {
         let mut imports = Vec::new();
-        let Some(import_idx) = self.queries.imports.capture_index_for_name("import") else { return imports; };
-
-        let mut matches = cursor.matches(&self.queries.imports, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != import_idx { continue; }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.imports, "import", *root, source, |node| {
                 let source_node = node.child_by_field_name("source");
                 let source_text = source_node.map(|s| {
                     let t = get_node_text(&s, source);
@@ -318,22 +306,15 @@ impl TypeScriptParser {
                         is_dependency: false,
                     });
                 }
-            }
-        }
+        });
         imports
     }
 
     fn find_calls(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<FunctionCallData> {
         let mut calls = Vec::new();
-        let Some(name_idx) = self.queries.calls.capture_index_for_name("name") else { return calls; };
-
-        let mut matches = cursor.matches(&self.queries.calls, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx { continue; }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.calls, "name", *root, source, |node| {
                 let call_node = {
-                    let Some(p) = node.parent() else { continue; };
+                    let Some(p) = node.parent() else { return; };
                     if p.kind() == "call_expression" || p.kind() == "new_expression" {
                         p
                     } else {
@@ -357,27 +338,20 @@ impl TypeScriptParser {
                     context: ctx,
                     language: Language::TypeScript,
                 });
-            }
-        }
+        });
         calls
     }
 
     fn find_variables(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<VariableData> {
         let mut variables = Vec::new();
-        let Some(name_idx) = self.queries.variables.capture_index_for_name("name") else { return variables; };
-
-        let mut matches = cursor.matches(&self.queries.variables, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx { continue; }
-                let node = cap.node;
-                let Some(declarator) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.variables, "name", *root, source, |node| {
+                let Some(declarator) = node.parent() else { return; };
                 // Skip function/arrow assignments
                 let value = declarator.child_by_field_name("value");
                 if let Some(v) = &value {
                     let k = v.kind();
                     if k == "function_expression" || k == "arrow_function" || k == "function" {
-                        continue;
+                        return;
                     }
                 }
                 let ctx = get_parent_context(&node, source, &["function_declaration", "method_definition", "class_declaration"]);
@@ -393,8 +367,7 @@ impl TypeScriptParser {
                     language: Language::TypeScript,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         variables
     }
 }
@@ -403,7 +376,7 @@ impl LanguageParser for TypeScriptParser {
     fn language(&self) -> Language { Language::TypeScript }
 
     fn parse(&self, path: &Path, source: &[u8], is_dependency: bool) -> Result<FileParseResult> {
-        let mut parser = self.make_parser();
+        let mut parser = build_parser(&self.ts_language);
         let tree = parser.parse(source, None).ok_or_else(|| Error::Parse {
             path: path.to_path_buf(), message: "tree-sitter failed to parse".into(),
         })?;

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -19,6 +19,12 @@ pub struct CodeGraph {
     /// Uses a single string key to allow zero-allocation lookups via `find_by_name`.
     #[serde(skip)]
     name_index: HashMap<String, Vec<NodeIndex>>,
+    /// Structural AST fingerprints keyed by node index (`NodeIndex::index()`),
+    /// populated for annotated graphs by `compute_structural_fingerprints()`.
+    /// Stored as sorted `(token, count)` pairs so serialization is deterministic.
+    /// A `BTreeMap` keeps the JSON key order stable across saves.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) fingerprints: BTreeMap<usize, Vec<(u64, u32)>>,
 }
 
 impl CodeGraph {
@@ -27,6 +33,7 @@ impl CodeGraph {
             graph: DiGraph::new(),
             path_index: HashMap::new(),
             name_index: HashMap::new(),
+            fingerprints: BTreeMap::new(),
         }
     }
 
@@ -99,6 +106,12 @@ impl CodeGraph {
         self.graph.node_weight(idx)
     }
 
+    /// Stored structural fingerprint (sorted `(token, count)` pairs) for a node,
+    /// if one was computed during an annotated build.
+    pub fn fingerprint_pairs(&self, idx: NodeIndex) -> Option<&[(u64, u32)]> {
+        self.fingerprints.get(&idx.index()).map(|v| v.as_slice())
+    }
+
     /// Count nodes by label.
     pub fn node_count(&self) -> usize {
         self.graph.node_count()
@@ -168,7 +181,9 @@ impl CodeGraph {
     }
 
     /// Current graph file format version. Increment when the serialized schema changes.
-    pub const FORMAT_VERSION: u32 = 1;
+    /// v2 added the `fingerprints` side-table (structural AST signatures).
+    /// v3 added constant/static indexing and field default values.
+    pub const FORMAT_VERSION: u32 = 3;
 
     /// Save the graph to a JSON file with a version envelope and config fingerprint.
     pub fn save(&self, path: &std::path::Path) -> crate::error::Result<()> {

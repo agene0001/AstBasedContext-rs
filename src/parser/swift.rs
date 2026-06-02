@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Language as TsLanguage, Node, Parser, Query, QueryCursor};
+use tree_sitter::{Language as TsLanguage, Node, Query, QueryCursor};
 
 use crate::error::{Error, Result};
 use crate::types::node::*;
@@ -19,13 +19,16 @@ const Q_FUNCTIONS: &str = r#"
     (init_declaration) @function_node
 "#;
 
+// tree-sitter-swift represents struct / class / enum all as `class_declaration`,
+// distinguished only by the leading keyword token (there is no `struct_declaration`
+// or `enum_declaration`). Match on the keyword to separate them.
 const Q_CLASSES: &str = r#"
-    (class_declaration
+    (class_declaration "class"
         name: (type_identifier) @name) @class_node
 "#;
 
 const Q_STRUCTS: &str = r#"
-    (struct_declaration
+    (class_declaration "struct"
         name: (type_identifier) @name) @struct_node
 "#;
 
@@ -35,20 +38,18 @@ const Q_PROTOCOLS: &str = r#"
 "#;
 
 const Q_ENUMS: &str = r#"
-    (enum_declaration
+    (class_declaration "enum"
         name: (type_identifier) @name) @enum_node
 "#;
 
 const Q_IMPORTS: &str = r#"
-    (import_declaration
-        path: (identifier) @path) @import
+    (import_declaration (identifier) @path) @import
 "#;
 
 const Q_CALLS: &str = r#"
+    (call_expression (simple_identifier) @name)
     (call_expression
-        function: (simple_identifier) @name)
-    (call_expression
-        function: (navigation_expression
+        (navigation_expression
             suffix: (navigation_suffix
                 suffix: (simple_identifier) @name)))
 "#;
@@ -111,14 +112,6 @@ impl SwiftParser {
             ts_language,
             queries,
         }
-    }
-
-    fn make_parser(&self) -> Parser {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&self.ts_language)
-            .expect("Swift language must load");
-        parser
     }
 
     fn find_functions(
@@ -225,20 +218,7 @@ impl SwiftParser {
         cursor: &mut QueryCursor,
     ) -> Vec<ClassData> {
         let mut classes = Vec::new();
-        let Some(name_idx) = self.queries.classes.capture_index_for_name("name") else {
-            return classes;
-        };
-
-        let mut matches = cursor.matches(&self.queries.classes, *root, source);
-        while let Some(m) = {
-            matches.advance();
-            matches.get()
-        } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.classes, "name", *root, source, |node| {
                 let class_node = node.parent().unwrap_or(node);
                 let name = get_node_text(&node, source).to_string();
 
@@ -263,8 +243,7 @@ impl SwiftParser {
                     source: None,
                     docstring: None,
                 });
-            }
-        }
+        });
         classes
     }
 
@@ -276,20 +255,7 @@ impl SwiftParser {
         cursor: &mut QueryCursor,
     ) -> Vec<StructData> {
         let mut structs = Vec::new();
-        let Some(name_idx) = self.queries.structs.capture_index_for_name("name") else {
-            return structs;
-        };
-
-        let mut matches = cursor.matches(&self.queries.structs, *root, source);
-        while let Some(m) = {
-            matches.advance();
-            matches.get()
-        } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.structs, "name", *root, source, |node| {
                 let struct_node = node.parent().unwrap_or(node);
                 let name = get_node_text(&node, source).to_string();
 
@@ -307,8 +273,7 @@ impl SwiftParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         structs
     }
 
@@ -320,20 +285,7 @@ impl SwiftParser {
         cursor: &mut QueryCursor,
     ) -> Vec<InterfaceData> {
         let mut interfaces = Vec::new();
-        let Some(name_idx) = self.queries.protocols.capture_index_for_name("name") else {
-            return interfaces;
-        };
-
-        let mut matches = cursor.matches(&self.queries.protocols, *root, source);
-        while let Some(m) = {
-            matches.advance();
-            matches.get()
-        } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.protocols, "name", *root, source, |node| {
                 let proto_node = node.parent().unwrap_or(node);
                 let name = get_node_text(&node, source).to_string();
 
@@ -353,8 +305,7 @@ impl SwiftParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         interfaces
     }
 
@@ -366,20 +317,7 @@ impl SwiftParser {
         cursor: &mut QueryCursor,
     ) -> Vec<EnumData> {
         let mut enums = Vec::new();
-        let Some(name_idx) = self.queries.enums.capture_index_for_name("name") else {
-            return enums;
-        };
-
-        let mut matches = cursor.matches(&self.queries.enums, *root, source);
-        while let Some(m) = {
-            matches.advance();
-            matches.get()
-        } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.enums, "name", *root, source, |node| {
                 let enum_node = node.parent().unwrap_or(node);
                 let name = get_node_text(&node, source).to_string();
 
@@ -397,8 +335,7 @@ impl SwiftParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         enums
     }
 
@@ -410,24 +347,11 @@ impl SwiftParser {
     ) -> Vec<ImportData> {
         let mut imports = Vec::new();
         let mut seen = HashSet::new();
-        let Some(path_idx) = self.queries.imports.capture_index_for_name("path") else {
-            return imports;
-        };
-
-        let mut matches = cursor.matches(&self.queries.imports, *root, source);
-        while let Some(m) = {
-            matches.advance();
-            matches.get()
-        } {
-            for cap in m.captures {
-                if cap.index != path_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.imports, "path", *root, source, |node| {
                 let import_path = get_node_text(&node, source).to_string();
 
                 if seen.contains(&import_path) {
-                    continue;
+                    return;
                 }
                 seen.insert(import_path.clone());
 
@@ -439,8 +363,7 @@ impl SwiftParser {
                     language: Language::Swift,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         imports
     }
 
@@ -451,22 +374,9 @@ impl SwiftParser {
         cursor: &mut QueryCursor,
     ) -> Vec<FunctionCallData> {
         let mut calls = Vec::new();
-        let Some(name_idx) = self.queries.calls.capture_index_for_name("name") else {
-            return calls;
-        };
-
-        let mut matches = cursor.matches(&self.queries.calls, *root, source);
-        while let Some(m) = {
-            matches.advance();
-            matches.get()
-        } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.calls, "name", *root, source, |node| {
                 let call_node = {
-                    let Some(mut p) = node.parent() else { continue };
+                    let Some(mut p) = node.parent() else { return };
                     while p.kind() != "call_expression" {
                         p = match p.parent() {
                             Some(pp) => pp,
@@ -493,8 +403,7 @@ impl SwiftParser {
                     context: ctx,
                     language: Language::Swift,
                 });
-            }
-        }
+        });
         calls
     }
 }
@@ -505,7 +414,7 @@ impl LanguageParser for SwiftParser {
     }
 
     fn parse(&self, path: &Path, source: &[u8], is_dependency: bool) -> Result<FileParseResult> {
-        let mut parser = self.make_parser();
+        let mut parser = build_parser(&self.ts_language);
         let tree = parser.parse(source, None).ok_or_else(|| Error::Parse {
             path: path.to_path_buf(),
             message: "tree-sitter failed to parse".into(),

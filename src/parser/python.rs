@@ -98,28 +98,12 @@ impl PythonParser {
         }
     }
 
-    fn make_parser(&self) -> Parser {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&self.ts_language)
-            .expect("Python language must load");
-        parser
-    }
-
     // ── extraction helpers ───────────────────────────────────────────────
 
     fn find_functions(&self, source: &[u8], root: &Node, tree: &tree_sitter::Tree, path: &Path, cursor: &mut QueryCursor) -> Vec<FunctionData> {
         let mut functions = Vec::new();
-        let Some(name_idx) = self.queries.functions.capture_index_for_name("name") else { return functions; };
-
-        let mut matches = cursor.matches(&self.queries.functions, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(func_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.functions, "name", *root, source, |node| {
+                let Some(func_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 let params_node = func_node.child_by_field_name("parameters");
@@ -211,9 +195,7 @@ impl PythonParser {
                     raises,
                     has_error_handling,
                 });
-            }
-        }
-        drop(matches);
+        });
 
         // Lambda assignments
         functions.extend(self.find_lambda_assignments(source, root, tree, path, cursor));
@@ -229,17 +211,9 @@ impl PythonParser {
         cursor: &mut QueryCursor,
     ) -> Vec<FunctionData> {
         let mut functions = Vec::new();
-        let Some(name_idx) = self.queries.lambda_assignments.capture_index_for_name("name") else { return functions; };
-
-        let mut matches = cursor.matches(&self.queries.lambda_assignments, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(assignment_node) = node.parent() else { continue; };
-                let Some(lambda_node) = assignment_node.child_by_field_name("right") else { continue; };
+        for_each_capture(cursor, &self.queries.lambda_assignments, "name", *root, source, |node| {
+                let Some(assignment_node) = node.parent() else { return; };
+                let Some(lambda_node) = assignment_node.child_by_field_name("right") else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 let params_node: Option<Node> = lambda_node.child_by_field_name("parameters");
@@ -299,23 +273,14 @@ impl PythonParser {
                     raises: vec![],
                     has_error_handling: false,
                 });
-            }
-        }
+        });
         functions
     }
 
     fn find_classes(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<ClassData> {
         let mut classes = Vec::new();
-        let Some(name_idx) = self.queries.classes.capture_index_for_name("name") else { return classes; };
-
-        let mut matches = cursor.matches(&self.queries.classes, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(class_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.classes, "name", *root, source, |node| {
+                let Some(class_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 let body_node = class_node.child_by_field_name("body");
@@ -353,8 +318,7 @@ impl PythonParser {
                     source: None,
                     docstring,
                 });
-            }
-        }
+        });
         classes
     }
 
@@ -453,22 +417,14 @@ impl PythonParser {
 
     fn find_calls(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<FunctionCallData> {
         let mut calls = Vec::new();
-        let Some(name_idx) = self.queries.calls.capture_index_for_name("name") else { return calls; };
-
-        let mut matches = cursor.matches(&self.queries.calls, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.calls, "name", *root, source, |node| {
 
                 // Walk up to the `call` node
                 let call_node = {
-                    let Some(p) = node.parent() else { continue; };
-                    if p.kind() == "call" { p } else { match p.parent() { Some(pp) => pp, None => continue } }
+                    let Some(p) = node.parent() else { return; };
+                    if p.kind() == "call" { p } else { match p.parent() { Some(pp) => pp, None => return } }
                 };
-                let Some(func_node) = call_node.child_by_field_name("function") else { continue; };
+                let Some(func_node) = call_node.child_by_field_name("function") else { return; };
 
                 let args = extract_call_args(&call_node, source);
 
@@ -487,8 +443,7 @@ impl PythonParser {
                     context: ctx,
                     language: Language::Python,
                 });
-            }
-        }
+        });
         calls
     }
 
@@ -500,21 +455,13 @@ impl PythonParser {
         cursor: &mut QueryCursor,
     ) -> Vec<VariableData> {
         let mut variables = Vec::new();
-        let Some(name_idx) = self.queries.variables.capture_index_for_name("name") else { return variables; };
-
-        let mut matches = cursor.matches(&self.queries.variables, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(assignment) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.variables, "name", *root, source, |node| {
+                let Some(assignment) = node.parent() else { return; };
 
                 // Skip lambda assignments
                 let right = assignment.child_by_field_name("right");
                 if right.as_ref().map(|r: &Node| r.kind()) == Some("lambda") {
-                    continue;
+                    return;
                 }
 
                 let name = get_node_text(&node, source).to_string();
@@ -540,8 +487,7 @@ impl PythonParser {
                     language: Language::Python,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         variables
     }
 }
@@ -552,7 +498,7 @@ impl LanguageParser for PythonParser {
     }
 
     fn parse(&self, path: &Path, source: &[u8], is_dependency: bool) -> Result<FileParseResult> {
-        let mut parser = self.make_parser();
+        let mut parser = build_parser(&self.ts_language);
         let tree = parser.parse(source, None).ok_or_else(|| Error::Parse {
             path: path.to_path_buf(),
             message: "tree-sitter failed to parse".into(),
@@ -780,6 +726,7 @@ fn extract_python_class_fields(body_node: Option<&Node>, source: &[u8]) -> Vec<F
                                         type_annotation: type_ann,
                                         visibility,
                                         is_static: true,
+                                        default_value: None,
                                     });
                                 }
                             }
@@ -798,6 +745,7 @@ fn extract_python_class_fields(body_node: Option<&Node>, source: &[u8]) -> Vec<F
                                         type_annotation: type_ann,
                                         visibility,
                                         is_static: true,
+                                        default_value: None,
                                     });
                                 }
                             }
@@ -833,6 +781,7 @@ fn extract_python_class_fields(body_node: Option<&Node>, source: &[u8]) -> Vec<F
                                     type_annotation: type_ann,
                                     visibility,
                                     is_static,
+                                    default_value: None,
                                 });
                             }
                         }

@@ -103,14 +103,6 @@ impl JavaScriptParser {
         }
     }
 
-    fn make_parser(&self) -> Parser {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&self.ts_language)
-            .expect("JavaScript language must load");
-        parser
-    }
-
     // ── extraction helpers ───────────────────────────────────────────────
 
     fn find_functions(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<FunctionData> {
@@ -233,15 +225,7 @@ impl JavaScriptParser {
     fn find_imports(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<ImportData> {
         let mut imports = Vec::new();
         let mut seen = HashSet::new();
-        let Some(import_idx) = self.queries.imports.capture_index_for_name("import") else { return imports; };
-
-        let mut matches = cursor.matches(&self.queries.imports, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != import_idx {
-                    continue;
-                }
-                let import_node = cap.node;
+        for_each_capture(cursor, &self.queries.imports, "import", *root, source, |import_node| {
                 let line_number = import_node.start_position().row as u32 + 1;
 
                 // Extract the source string (the module path)
@@ -363,26 +347,17 @@ impl JavaScriptParser {
                         });
                     }
                 }
-            }
-        }
+        });
         imports
     }
 
     fn find_calls(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<FunctionCallData> {
         let mut calls = Vec::new();
-        let Some(name_idx) = self.queries.calls.capture_index_for_name("name") else { return calls; };
-
-        let mut matches = cursor.matches(&self.queries.calls, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.calls, "name", *root, source, |node| {
 
                 // Walk up to the call_expression or new_expression node
                 let call_node = {
-                    let Some(mut p) = node.parent() else { continue; };
+                    let Some(mut p) = node.parent() else { return; };
                     while p.kind() != "call_expression" && p.kind() != "new_expression" {
                         p = match p.parent() {
                             Some(pp) => pp,
@@ -423,30 +398,21 @@ impl JavaScriptParser {
                     context: ctx,
                     language: Language::JavaScript,
                 });
-            }
-        }
+        });
         calls
     }
 
     fn find_variables(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<VariableData> {
         let mut variables = Vec::new();
-        let Some(name_idx) = self.queries.variables.capture_index_for_name("name") else { return variables; };
-
-        let mut matches = cursor.matches(&self.queries.variables, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(declarator) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.variables, "name", *root, source, |node| {
+                let Some(declarator) = node.parent() else { return; };
 
                 // Skip if the value is a function/arrow function (those are handled by find_functions)
                 let value_node = declarator.child_by_field_name("value");
                 if let Some(ref val) = value_node {
                     let kind = val.kind();
                     if kind == "function" || kind == "arrow_function" {
-                        continue;
+                        return;
                     }
                 }
 
@@ -471,8 +437,7 @@ impl JavaScriptParser {
                     language: Language::JavaScript,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         variables
     }
 }
@@ -483,7 +448,7 @@ impl LanguageParser for JavaScriptParser {
     }
 
     fn parse(&self, path: &Path, source: &[u8], is_dependency: bool) -> Result<FileParseResult> {
-        let mut parser = self.make_parser();
+        let mut parser = build_parser(&self.ts_language);
         let tree = parser.parse(source, None).ok_or_else(|| Error::Parse {
             path: path.to_path_buf(),
             message: "tree-sitter failed to parse".into(),

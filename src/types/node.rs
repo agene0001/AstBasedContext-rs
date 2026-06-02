@@ -19,6 +19,10 @@ pub struct FieldDecl {
     pub type_annotation: Option<String>,
     pub visibility: Option<String>,
     pub is_static: bool,
+    /// Default value for this field, if discoverable (e.g. from a Rust
+    /// `impl Default` block). Lets queries answer "what's the default for X".
+    #[serde(default)]
+    pub default_value: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

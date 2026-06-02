@@ -119,28 +119,12 @@ impl GoParser {
         }
     }
 
-    fn make_parser(&self) -> Parser {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&self.ts_language)
-            .expect("Go language must load");
-        parser
-    }
-
     // ── extraction helpers ───────────────────────────────────────────────
 
     fn find_functions(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<FunctionData> {
         let mut functions = Vec::new();
-        let Some(name_idx) = self.queries.functions.capture_index_for_name("name") else { return functions; };
-
-        let mut matches = cursor.matches(&self.queries.functions, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-                let Some(func_node) = node.parent() else { continue; };
+        for_each_capture(cursor, &self.queries.functions, "name", *root, source, |node| {
+                let Some(func_node) = node.parent() else { return; };
                 let name = get_node_text(&node, source).to_string();
 
                 let params_node = func_node.child_by_field_name("parameters");
@@ -207,25 +191,16 @@ impl GoParser {
                     raises: vec![],
                     has_error_handling: false,
                 });
-            }
-        }
+        });
         functions
     }
 
     fn find_structs(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<StructData> {
         let mut structs = Vec::new();
-        let Some(name_idx) = self.queries.structs.capture_index_for_name("name") else { return structs; };
-
-        let mut matches = cursor.matches(&self.queries.structs, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.structs, "name", *root, source, |node| {
                 // Walk up to the type_declaration node
                 let struct_node = {
-                    let Some(mut p) = node.parent() else { continue; };
+                    let Some(mut p) = node.parent() else { return; };
                     while p.kind() != "type_declaration" {
                         p = match p.parent() { Some(pp) => pp, None => break };
                     }
@@ -250,24 +225,15 @@ impl GoParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         structs
     }
 
     fn find_interfaces(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<InterfaceData> {
         let mut interfaces = Vec::new();
-        let Some(name_idx) = self.queries.interfaces.capture_index_for_name("name") else { return interfaces; };
-
-        let mut matches = cursor.matches(&self.queries.interfaces, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.interfaces, "name", *root, source, |node| {
                 let iface_node = {
-                    let Some(mut p) = node.parent() else { continue; };
+                    let Some(mut p) = node.parent() else { return; };
                     while p.kind() != "type_declaration" {
                         p = match p.parent() { Some(pp) => pp, None => break };
                     }
@@ -289,23 +255,14 @@ impl GoParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         interfaces
     }
 
     fn find_imports(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<ImportData> {
         let mut imports = Vec::new();
         let mut seen = HashSet::new();
-        let Some(path_idx) = self.queries.imports.capture_index_for_name("path") else { return imports; };
-
-        let mut matches = cursor.matches(&self.queries.imports, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != path_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.imports, "path", *root, source, |node| {
                 let raw_path = get_node_text(&node, source);
 
                 // Strip surrounding quotes
@@ -315,7 +272,7 @@ impl GoParser {
                     .to_string();
 
                 if seen.contains(&import_path) {
-                    continue;
+                    return;
                 }
                 seen.insert(import_path.clone());
 
@@ -334,32 +291,22 @@ impl GoParser {
                     language: Language::Go,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         imports
     }
 
     fn find_calls(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<FunctionCallData> {
         let mut calls = Vec::new();
-        let Some(name_idx) = self.queries.calls.capture_index_for_name("name") else { return calls; };
-
-        let mut matches = cursor.matches(&self.queries.calls, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
-
+        for_each_capture(cursor, &self.queries.calls, "name", *root, source, |node| {
                 // Walk up to the call_expression node
                 let call_node = {
-                    let Some(mut p) = node.parent() else { continue; };
+                    let Some(mut p) = node.parent() else { return; };
                     while p.kind() != "call_expression" {
                         p = match p.parent() { Some(pp) => pp, None => break };
                     }
                     p
                 };
-                let Some(func_node) = call_node.child_by_field_name("function") else { continue; };
+                let Some(func_node) = call_node.child_by_field_name("function") else { return; };
 
                 let args = extract_go_call_args(&call_node, source);
                 let ctx = get_parent_context(
@@ -377,27 +324,18 @@ impl GoParser {
                     context: ctx,
                     language: Language::Go,
                 });
-            }
-        }
+        });
         calls
     }
 
     fn find_variables(&self, source: &[u8], root: &Node, path: &Path, cursor: &mut QueryCursor) -> Vec<VariableData> {
         let mut variables = Vec::new();
-        let Some(name_idx) = self.queries.variables.capture_index_for_name("name") else { return variables; };
-
-        let mut matches = cursor.matches(&self.queries.variables, *root, source);
-        while let Some(m) = { matches.advance(); matches.get() } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.variables, "name", *root, source, |node| {
                 let name = get_node_text(&node, source).to_string();
 
                 // Walk up to the declaration node (var_declaration or short_var_declaration)
                 let decl_node = {
-                    let Some(mut p) = node.parent() else { continue; };
+                    let Some(mut p) = node.parent() else { return; };
                     while p.kind() != "var_declaration"
                         && p.kind() != "short_var_declaration"
                         && p.kind() != "var_spec"
@@ -443,8 +381,7 @@ impl GoParser {
                     language: Language::Go,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         variables
     }
 }
@@ -455,7 +392,7 @@ impl LanguageParser for GoParser {
     }
 
     fn parse(&self, path: &Path, source: &[u8], is_dependency: bool) -> Result<FileParseResult> {
-        let mut parser = self.make_parser();
+        let mut parser = build_parser(&self.ts_language);
         let tree = parser.parse(source, None).ok_or_else(|| Error::Parse {
             path: path.to_path_buf(),
             message: "tree-sitter failed to parse".into(),
@@ -572,6 +509,7 @@ fn extract_go_struct_fields(type_decl_node: &Node, source: &[u8]) -> Vec<FieldDe
                     type_annotation: type_ann,
                     visibility: vis,
                     is_static: false,
+                    default_value: None,
                 });
             }
         }

@@ -79,9 +79,15 @@ impl GraphBuilder {
         info!("Found {} source files in {}", files.len(), root_path.display());
         eprintln!("[ast-context] Found {} source files — parsing...", files.len());
 
-        // Pre-scan: build imports_map (name → file paths) from all source files.
-        // Maps a file's stem (e.g. "utils" for "utils.py") and any top-level
-        // class/function names to the file paths that define them.
+        // Pre-scan: build imports_map (module name → file paths) from all source files.
+        // This maps each file's stem (e.g. "utils" for "utils.py") to the paths
+        // that define it, which resolves module-style references like `utils.foo()`.
+        //
+        // NOTE: this does NOT index individual top-level class/function names.
+        // Symbol-style references (e.g. `from utils import foo; foo()`) are resolved
+        // later by `global_func_lookup` in Pass 2 — by name only, without path
+        // disambiguation. Populating symbol names here would make that resolution
+        // more precise when a name is defined in multiple files; see issue tracker.
         let mut imports_map: HashMap<String, Vec<String>> = HashMap::new();
         for file_path in &files {
             let stem = file_path
@@ -546,15 +552,23 @@ impl GraphBuilder {
                             .get(called_name.as_str())
                             .and_then(|candidates| {
                                 if let Some(q) = qualifier {
-                                    // Qualified call: only match if a candidate's
-                                    // class_context matches the qualifier.
+                                    // Qualified call. First try a method/associated
+                                    // fn whose class matches the qualifier (e.g.
+                                    // `HashMap::new` → a `new` with class_context
+                                    // "HashMap"). This blocks `HashMap::new()` from
+                                    // resolving to a project-local `Cache::new()`.
                                     candidates.iter().find(|&&idx| {
-                                        if let Some(GraphNode::Function(f)) = graph.graph.node_weight(idx) {
-                                            f.class_context.as_deref() == Some(q)
-                                        } else {
-                                            false
-                                        }
+                                        matches!(graph.graph.node_weight(idx),
+                                            Some(GraphNode::Function(f)) if f.class_context.as_deref() == Some(q))
                                     }).copied()
+                                    // Otherwise, if no method matches, the qualifier
+                                    // is a *module* and the target is a free function
+                                    // (e.g. `type_system::detect_x()` → free fn
+                                    // `detect_x`). Match a free function of that name.
+                                    .or_else(|| candidates.iter().find(|&&idx| {
+                                        matches!(graph.graph.node_weight(idx),
+                                            Some(GraphNode::Function(f)) if f.class_context.is_none())
+                                    }).copied())
                                 } else {
                                     // Unqualified call: use first match.
                                     candidates.first().copied()
@@ -695,6 +709,13 @@ impl GraphBuilder {
                     graph.graph.add_edge(*test_idx, prod_idx, EdgeKind::Tests);
                 }
             }
+        }
+
+        // Pre-compute structural AST fingerprints once (annotated graphs only),
+        // so similarity queries don't re-parse snippets on every call.
+        if annotate_sources {
+            eprintln!("[ast-context] Computing structural fingerprints...");
+            graph.compute_structural_fingerprints();
         }
 
         info!(

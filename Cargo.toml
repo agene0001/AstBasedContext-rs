@@ -1,6 +1,6 @@
 [package]
 name = "ast_context"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 description = "AST/CST-based code graph analysis — index codebases, find dead code, detect redundancy, and expose everything via an MCP server for AI assistants"
 license = "MIT"
@@ -16,39 +16,38 @@ path = "src/main.rs"
 
 [dependencies]
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4.6.1", features = ["derive"] }
 dirs = "6"
 petgraph = { version = "0.8.3", features = ["serde-1"] }
 
 # MCP / serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-log = "0.4"
+log = "0.4.30"
 env_logger = "0.11"
 
 # Core analysis
-tree-sitter = "0.26.8"
+tree-sitter = "0.26.9"
 tree-sitter-python = "0.25"
 tree-sitter-rust = "0.24.2"
 tree-sitter-javascript = "0.25"
 tree-sitter-typescript = "0.23"
 tree-sitter-go = "0.25"
 tree-sitter-java = "0.23"
-tree-sitter-c = "0.24.1"
+tree-sitter-c = "0.24.2"
 tree-sitter-cpp = "0.23"
-tree-sitter-c-sharp = "0.23"
+tree-sitter-c-sharp = "0.23.5"
 tree-sitter-ruby = "0.23"
 tree-sitter-php = "0.24.2"
 tree-sitter-language = "0.1"
-tree-sitter-swift = "0.7.1"
+tree-sitter-swift = "0.7.3"
 # TODO: Add tree-sitter-kotlin (currently skipped due to dependency issues: crates.io version targets tree-sitter <0.23, and vendoring parser.c is impractical due to 23MB size)
 # tree-sitter-dart: vendored via grammars/dart/ (crates.io version targets tree-sitter <0.26)
 thiserror = "2"
-ignore = "0.4"
-rayon = "1.10"
+ignore = "0.4.25"
+rayon = "1.12"
 streaming-iterator = "0.1"
 notify-debouncer-full = "0.7"
-rand = "0.10.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 notify = { version = "7", features = ["macos_fsevent"] }
@@ -60,7 +59,7 @@ notify = { version = "7" }
 libc = "0.2"
 
 [build-dependencies]
-cc = "1"
+cc = "1.2.63"
 
 [dev-dependencies]
 pretty_assertions = "1"

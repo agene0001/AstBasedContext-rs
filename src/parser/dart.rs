@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Language as TsLanguage, Node, Parser, Query, QueryCursor};
+use tree_sitter::{Language as TsLanguage, Node, Query, QueryCursor};
 use tree_sitter_language::LanguageFn;
 
 use crate::error::{Error, Result};
@@ -16,7 +16,7 @@ use super::LanguageParser;
 // The tree-sitter-dart crate on crates.io targets tree-sitter <0.26.
 // We vendor parser.c + scanner.c in grammars/dart/ and compile them via build.rs.
 
-extern "C" {
+unsafe extern "C" {
     fn tree_sitter_dart() -> *const ();
 }
 
@@ -25,10 +25,10 @@ pub const LANGUAGE: LanguageFn = unsafe { LanguageFn::from_raw(tree_sitter_dart)
 
 // ── Tree-sitter query strings ─────────────────────────────────────────────
 
+// A `function_signature` covers both top-level functions and methods (a
+// `method_signature` wraps a `function_signature`), so one pattern suffices.
 const Q_FUNCTIONS: &str = r#"
     (function_signature
-        name: (identifier) @name) @function_node
-    (method_signature
         name: (identifier) @name) @function_node
 "#;
 
@@ -37,9 +37,10 @@ const Q_CLASSES: &str = r#"
         name: (identifier) @name) @class_node
 "#;
 
+// A mixin's name is an unnamed `identifier` child after the `mixin` keyword
+// (not a `name:` field).
 const Q_MIXINS: &str = r#"
-    (mixin_declaration
-        name: (identifier) @name) @mixin_node
+    (mixin_declaration (identifier) @name) @mixin_node
 "#;
 
 const Q_ENUMS: &str = r#"
@@ -49,25 +50,15 @@ const Q_ENUMS: &str = r#"
 
 const Q_IMPORTS: &str = r#"
     (import_or_export
-        (configured_uri
-            (uri) @path)) @import
-    (import_or_export
-        (uri) @path) @import
+        (library_import
+            (import_specification
+                (configurable_uri (uri) @path)))) @import
 "#;
 
+// Dart has no wrapping "call" node: a call is an `identifier` immediately
+// followed by a `selector` holding the argument list. Anchor (`.`) the two.
 const Q_CALLS: &str = r#"
-    (argument_part
-        (arguments
-            (argument
-                (expression_without_cascade
-                    (assignable_expression
-                        (primary
-                            (identifier) @name))))))
-    (postfix_expression
-        (primary
-            (identifier) @name)
-        (selector
-            (argument_part)))
+    ((identifier) @name . (selector (argument_part)))
 "#;
 
 /// Complexity-contributing node types for Dart.
@@ -128,14 +119,6 @@ impl DartParser {
         }
     }
 
-    fn make_parser(&self) -> Parser {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&self.ts_language)
-            .expect("Dart language must load");
-        parser
-    }
-
     fn find_functions(
         &self,
         source: &[u8],
@@ -144,20 +127,7 @@ impl DartParser {
         cursor: &mut QueryCursor,
     ) -> Vec<FunctionData> {
         let mut functions = Vec::new();
-        let Some(name_idx) = self.queries.functions.capture_index_for_name("name") else {
-            return functions;
-        };
-
-        let mut matches = cursor.matches(&self.queries.functions, *root, source);
-        while let Some(m) = {
-            matches.advance();
-            matches.get()
-        } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.functions, "name", *root, source, |node| {
                 let func_node = node.parent().unwrap_or(node);
                 let name = get_node_text(&node, source).to_string();
 
@@ -206,8 +176,7 @@ impl DartParser {
                     raises: vec![],
                     has_error_handling: false,
                 });
-            }
-        }
+        });
         functions
     }
 
@@ -219,20 +188,7 @@ impl DartParser {
         cursor: &mut QueryCursor,
     ) -> Vec<ClassData> {
         let mut classes = Vec::new();
-        let Some(name_idx) = self.queries.classes.capture_index_for_name("name") else {
-            return classes;
-        };
-
-        let mut matches = cursor.matches(&self.queries.classes, *root, source);
-        while let Some(m) = {
-            matches.advance();
-            matches.get()
-        } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.classes, "name", *root, source, |node| {
                 let class_node = node.parent().unwrap_or(node);
                 let name = get_node_text(&node, source).to_string();
 
@@ -257,8 +213,7 @@ impl DartParser {
                     source: None,
                     docstring: None,
                 });
-            }
-        }
+        });
         classes
     }
 
@@ -270,20 +225,7 @@ impl DartParser {
         cursor: &mut QueryCursor,
     ) -> Vec<ClassData> {
         let mut mixins = Vec::new();
-        let Some(name_idx) = self.queries.mixins.capture_index_for_name("name") else {
-            return mixins;
-        };
-
-        let mut matches = cursor.matches(&self.queries.mixins, *root, source);
-        while let Some(m) = {
-            matches.advance();
-            matches.get()
-        } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.mixins, "name", *root, source, |node| {
                 let mixin_node = node.parent().unwrap_or(node);
                 let name = get_node_text(&node, source).to_string();
 
@@ -305,8 +247,7 @@ impl DartParser {
                     source: None,
                     docstring: None,
                 });
-            }
-        }
+        });
         mixins
     }
 
@@ -318,20 +259,7 @@ impl DartParser {
         cursor: &mut QueryCursor,
     ) -> Vec<EnumData> {
         let mut enums = Vec::new();
-        let Some(name_idx) = self.queries.enums.capture_index_for_name("name") else {
-            return enums;
-        };
-
-        let mut matches = cursor.matches(&self.queries.enums, *root, source);
-        while let Some(m) = {
-            matches.advance();
-            matches.get()
-        } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.enums, "name", *root, source, |node| {
                 let enum_node = node.parent().unwrap_or(node);
                 let name = get_node_text(&node, source).to_string();
 
@@ -349,8 +277,7 @@ impl DartParser {
                     is_dependency: false,
                     source: None,
                 });
-            }
-        }
+        });
         enums
     }
 
@@ -362,20 +289,7 @@ impl DartParser {
     ) -> Vec<ImportData> {
         let mut imports = Vec::new();
         let mut seen = HashSet::new();
-        let Some(path_idx) = self.queries.imports.capture_index_for_name("path") else {
-            return imports;
-        };
-
-        let mut matches = cursor.matches(&self.queries.imports, *root, source);
-        while let Some(m) = {
-            matches.advance();
-            matches.get()
-        } {
-            for cap in m.captures {
-                if cap.index != path_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.imports, "path", *root, source, |node| {
                 let raw = get_node_text(&node, source)
                     .trim()
                     .trim_matches('\'')
@@ -383,7 +297,7 @@ impl DartParser {
                     .to_string();
 
                 if seen.contains(&raw) || raw.is_empty() {
-                    continue;
+                    return;
                 }
                 seen.insert(raw.clone());
 
@@ -402,8 +316,7 @@ impl DartParser {
                     language: Language::Dart,
                     is_dependency: false,
                 });
-            }
-        }
+        });
         imports
     }
 
@@ -414,20 +327,7 @@ impl DartParser {
         cursor: &mut QueryCursor,
     ) -> Vec<FunctionCallData> {
         let mut calls = Vec::new();
-        let Some(name_idx) = self.queries.calls.capture_index_for_name("name") else {
-            return calls;
-        };
-
-        let mut matches = cursor.matches(&self.queries.calls, *root, source);
-        while let Some(m) = {
-            matches.advance();
-            matches.get()
-        } {
-            for cap in m.captures {
-                if cap.index != name_idx {
-                    continue;
-                }
-                let node = cap.node;
+        for_each_capture(cursor, &self.queries.calls, "name", *root, source, |node| {
                 let ctx = get_parent_context(
                     &node,
                     source,
@@ -443,8 +343,7 @@ impl DartParser {
                     context: ctx,
                     language: Language::Dart,
                 });
-            }
-        }
+        });
         calls
     }
 }
@@ -455,7 +354,7 @@ impl LanguageParser for DartParser {
     }
 
     fn parse(&self, path: &Path, source: &[u8], is_dependency: bool) -> Result<FileParseResult> {
-        let mut parser = self.make_parser();
+        let mut parser = build_parser(&self.ts_language);
         let tree = parser.parse(source, None).ok_or_else(|| Error::Parse {
             path: path.to_path_buf(),
             message: "tree-sitter failed to parse".into(),

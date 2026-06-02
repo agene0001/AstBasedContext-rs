@@ -864,18 +864,26 @@ pub(super) fn detect_inappropriate_intimacy(
             continue;
         }
 
+        // Normalize pair order (smaller name first) so the finding is deterministic
+        // regardless of which direction the HashMap iteration encountered first.
+        let (ca, cb, ab, ba) = if a < b {
+            (a.clone(), b.clone(), *a_to_b, b_to_a)
+        } else {
+            (b.clone(), a.clone(), b_to_a, *a_to_b)
+        };
+
         findings.push(Finding {
             tier: Tier::Low,
             kind: FindingKind::InappropriateIntimacy {
-                class_a: a.clone(),
-                class_b: b.clone(),
-                a_to_b_calls: *a_to_b,
-                b_to_a_calls: b_to_a,
+                class_a: ca.clone(),
+                class_b: cb.clone(),
+                a_to_b_calls: ab,
+                b_to_a_calls: ba,
             },
             node_indices: vec![],
             description: format!(
                 "`{}` ↔ `{}`: {} A→B, {} B→A calls — extract shared logic or introduce mediator.",
-                a, b, a_to_b, b_to_a
+                ca, cb, ab, ba
             ),
         });
     }
@@ -1034,17 +1042,24 @@ pub(super) fn detect_parallel_inheritance(
                     continue;
                 }
 
+                // Normalize pair order (smaller name first) for deterministic output.
+                let (ha, hb) = if parent_a < parent_b {
+                    (parent_a.clone(), parent_b.clone())
+                } else {
+                    (parent_b.clone(), parent_a.clone())
+                };
+
                 findings.push(Finding {
                     tier: Tier::Low,
                     kind: FindingKind::ParallelInheritance {
-                        hierarchy_a: parent_a.clone(),
-                        hierarchy_b: parent_b.clone(),
+                        hierarchy_a: ha.clone(),
+                        hierarchy_b: hb.clone(),
                         paired_count: paired,
                     },
                     node_indices: vec![],
                     description: format!(
                         "Hierarchies `{}` and `{}`: {} paired subclasses — merge with composition or generics.",
-                        parent_a, parent_b, paired
+                        ha, hb, paired
                     ),
                 });
             }
@@ -1188,16 +1203,22 @@ pub(super) fn detect_unstable_dependency(
     use petgraph::visit::EdgeRef;
     let mut reported: HashSet<(String, String)> = HashSet::new();
 
-    // Build file stem → file_caller_count lookup for module resolution
-    let file_stem_to_path: HashMap<String, (String, String)> = file_caller_count
-        .iter()
-        .filter_map(|(path, &_count)| {
-            let p = std::path::Path::new(path);
-            let stem = p.file_stem()?.to_string_lossy().to_string();
-            let name = p.file_name()?.to_string_lossy().to_string();
-            Some((stem, (path.clone(), name)))
-        })
-        .collect();
+    // Build file stem → path lookup for module resolution. Many files share a
+    // stem (e.g. mod.rs in every directory), so insert in SORTED path order to
+    // make the last-write-wins deterministic — otherwise HashMap iteration order
+    // (randomized per process) picks a different winner each run.
+    let mut paths: Vec<&String> = file_caller_count.keys().collect();
+    paths.sort();
+    let mut file_stem_to_path: HashMap<String, (String, String)> = HashMap::new();
+    for path in paths {
+        let p = std::path::Path::new(path);
+        if let (Some(stem), Some(name)) = (p.file_stem(), p.file_name()) {
+            file_stem_to_path.insert(
+                stem.to_string_lossy().to_string(),
+                (path.clone(), name.to_string_lossy().to_string()),
+            );
+        }
+    }
 
     for &(idx, node) in &ctx.files {
         if let GraphNode::File(fd) = node {

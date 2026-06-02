@@ -2,3 +2,4 @@ target/
 *.swp
 *.swo
 .DS_Store
+.ast_context_cache.json

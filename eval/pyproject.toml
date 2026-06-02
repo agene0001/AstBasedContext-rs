@@ -1,0 +1,12 @@
+[project]
+name = "ast-context-eval"
+version = "0.1.0"
+description = "LLM-in-the-loop eval: tokens-per-correct-answer, ast_context tools vs raw file reading."
+requires-python = ">=3.10"
+dependencies = [
+    "google-genai>=1.0",
+]
+
+# Out of CI by design — this hits the Gemini API. Run manually:
+#   export GEMINI_API_KEY=...        # from https://aistudio.google.com/apikey
+#   cd eval && uv run run_eval.py
