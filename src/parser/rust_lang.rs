@@ -10,6 +10,7 @@ use crate::types::{FileParseResult, Language};
 
 use super::common::*;
 use super::LanguageParser;
+use std::collections::HashMap;
 
 // ── Tree-sitter query strings ────────────────────────────────────────────
 
@@ -46,6 +47,7 @@ const Q_CALLS: &str = r#"
             (field_expression field: (field_identifier) @name)
             (scoped_identifier name: (identifier) @name)
         ])
+    (token_tree (identifier) @name . (token_tree))
 "#;
 
 const Q_VARIABLES: &str = r#"
@@ -202,20 +204,14 @@ impl RustParser {
                     return_type,
                     visibility,
                     is_static,
-                    is_abstract: false,
                     is_async,
                     todo_comments,
-                    raises: vec![],
-                    has_error_handling: false,
                     cyclomatic_complexity: complexity,
                     decorators: Vec::new(), // Rust uses attributes, not decorators
                     context: ctx.as_ref().map(|(n, _, _)| n.clone()),
                     context_type: ctx.as_ref().map(|(_, t, _)| t.clone()),
                     class_context: class_ctx,
-                    language: Language::Rust,
-                    is_dependency: false,
-                    source: None,
-                    docstring: None,
+                    ..FunctionData::template(Language::Rust)
                 });
         });
         functions
@@ -351,18 +347,37 @@ impl RustParser {
     fn find_calls(&self, source: &[u8], root: &Node, cursor: &mut QueryCursor) -> Vec<FunctionCallData> {
         let mut calls = Vec::new();
         for_each_capture(cursor, &self.queries.calls, "name", *root, source, |node| {
+                let name = get_node_text(&node, source).to_string();
 
-                // Walk up to the call_expression node
-                let call_node = {
-                    let Some(mut p) = node.parent() else { return; };
-                    while p.kind() != "call_expression" {
-                        p = match p.parent() { Some(pp) => pp, None => break };
+                // Find the enclosing call_expression, if any. For calls inside a
+                // macro (`format!(.., foo(x))`) there is none — the name lives in a
+                // token_tree — but it's still a real call, so we keep it (args
+                // unknown). Resolution downstream only links names that resolve to a
+                // known function, so bare-identifier arguments that are variables
+                // simply produce no edge.
+                let mut call_node = None;
+                let mut p = node.parent();
+                while let Some(cur) = p {
+                    match cur.kind() {
+                        "call_expression" => {
+                            call_node = Some(cur);
+                            break;
+                        }
+                        "function_item" | "source_file" => break,
+                        _ => p = cur.parent(),
                     }
-                    p
-                };
-                let Some(func_node) = call_node.child_by_field_name("function") else { return; };
+                }
 
-                let args = extract_rust_call_args(&call_node, source);
+                let (full_name, args) = match call_node {
+                    Some(c) => (
+                        c.child_by_field_name("function")
+                            .map(|f| get_node_text(&f, source).to_string())
+                            .unwrap_or_else(|| name.clone()),
+                        extract_rust_call_args(&c, source),
+                    ),
+                    None => (name.clone(), Vec::new()),
+                };
+
                 let ctx = get_parent_context(
                     &node,
                     source,
@@ -370,8 +385,8 @@ impl RustParser {
                 );
 
                 calls.push(FunctionCallData {
-                    name: get_node_text(&node, source).to_string(),
-                    full_name: get_node_text(&func_node, source).to_string(),
+                    name,
+                    full_name,
                     line_number: node.start_position().row as u32 + 1,
                     args,
                     inferred_obj_type: None,
@@ -584,8 +599,8 @@ fn extract_default_values(
     root: &Node,
     source: &[u8],
     struct_name: &str,
-) -> std::collections::HashMap<String, String> {
-    let mut out = std::collections::HashMap::new();
+) -> HashMap<String, String> {
+    let mut out = HashMap::new();
     let mut stack = vec![*root];
     while let Some(n) = stack.pop() {
         if n.kind() == "impl_item" {
@@ -612,7 +627,7 @@ fn extract_default_values(
 fn collect_field_initializers(
     node: &Node,
     source: &[u8],
-    out: &mut std::collections::HashMap<String, String>,
+    out: &mut HashMap<String, String>,
 ) {
     let mut stack = vec![*node];
     while let Some(n) = stack.pop() {
@@ -761,9 +776,9 @@ fn extract_impl_context(node: &Node, source: &[u8]) -> (Option<String>, Option<S
 /// Pre-scan Rust files to build an imports_map: name -> list of file paths.
 pub fn pre_scan_rust(
     files: &[std::path::PathBuf],
-) -> std::collections::HashMap<String, Vec<String>> {
-    let mut imports_map: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
+) -> HashMap<String, Vec<String>> {
+    let mut imports_map: HashMap<String, Vec<String>> =
+        HashMap::new();
     let ts_lang: TsLanguage = tree_sitter_rust::LANGUAGE.into();
     let query_str = r#"
         (struct_item name: (type_identifier) @name)

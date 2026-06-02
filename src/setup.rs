@@ -7,6 +7,8 @@
 //!   - Cursor          (~/.cursor/mcp.json)
 
 use std::path::{Path, PathBuf};
+use serde_json::Map;
+use serde_json::Value;
 
 // ── Public entry point ──────────────────────────────────────────────────────
 
@@ -232,7 +234,7 @@ impl McpTarget for ClaudeDesktop {
             .ok_or("config root is not a JSON object")?;
         let servers = root_obj
             .entry("mcpServers")
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            .or_insert_with(|| Value::Object(Map::new()));
         let map = servers
             .as_object_mut()
             .ok_or("mcpServers is not an object")?;
@@ -353,7 +355,7 @@ impl McpTarget for Zed {
             .ok_or("config root is not a JSON object")?;
         let servers = root_obj
             .entry("context_servers")
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            .or_insert_with(|| Value::Object(Map::new()));
         let map = servers
             .as_object_mut()
             .ok_or("context_servers is not an object")?;
@@ -412,7 +414,7 @@ impl McpTarget for Cursor {
             .ok_or("config root is not a JSON object")?;
         let servers = root_obj
             .entry("mcpServers")
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            .or_insert_with(|| Value::Object(Map::new()));
         let map = servers
             .as_object_mut()
             .ok_or("mcpServers is not an object")?;
@@ -462,7 +464,7 @@ impl McpTarget for Windsurf {
             .ok_or("config root is not a JSON object")?;
         let servers = root_obj
             .entry("mcpServers")
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            .or_insert_with(|| Value::Object(Map::new()));
         let map = servers
             .as_object_mut()
             .ok_or("mcpServers is not an object")?;
@@ -514,7 +516,7 @@ impl McpTarget for VsCode {
             .or_insert_with(|| serde_json::json!([]));
         let servers = root_obj
             .entry("servers")
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            .or_insert_with(|| Value::Object(Map::new()));
         let map = servers.as_object_mut().ok_or("servers is not an object")?;
         map.insert(
             "ast-context".into(),
@@ -605,7 +607,7 @@ fn configure_jetbrains_mcp(config_path: &Path, mcp_bin: &Path) -> Result<(), Str
         .ok_or("config root is not a JSON object")?;
     let servers = root_obj
         .entry("mcpServers")
-        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        .or_insert_with(|| Value::Object(Map::new()));
     let map = servers
         .as_object_mut()
         .ok_or("mcpServers is not an object")?;
@@ -666,9 +668,9 @@ fn jetbrains_base_dir() -> Option<PathBuf> {
 
 // ── JSON helpers ─────────────────────────────────────────────────────────────
 
-fn read_or_empty_object(path: &Path) -> Result<serde_json::Value, String> {
+fn read_or_empty_object(path: &Path) -> Result<Value, String> {
     if !path.exists() {
-        return Ok(serde_json::Value::Object(serde_json::Map::new()));
+        return Ok(Value::Object(Map::new()));
     }
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
@@ -678,7 +680,7 @@ fn read_or_empty_object(path: &Path) -> Result<serde_json::Value, String> {
     let trimmed = no_commas.trim();
 
     if trimmed.is_empty() {
-        return Ok(serde_json::Value::Object(serde_json::Map::new()));
+        return Ok(Value::Object(Map::new()));
     }
     serde_json::from_str(trimmed).map_err(|e| format!("failed to parse {}: {e}", path.display()))
 }
@@ -774,7 +776,7 @@ fn strip_json_comments(json: &str) -> String {
     out
 }
 
-fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+fn write_json(path: &Path, value: &Value) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("failed to create directory {}: {e}", parent.display()))?;
@@ -789,7 +791,7 @@ fn json_has_ast_context(path: &Path, key_path: &[&str]) -> bool {
     let Ok(content) = std::fs::read_to_string(path) else {
         return false;
     };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+    let Ok(value) = serde_json::from_str::<Value>(&content) else {
         return false;
     };
     let mut current = &value;

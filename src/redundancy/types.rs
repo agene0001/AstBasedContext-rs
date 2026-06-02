@@ -693,6 +693,14 @@ pub enum FindingKind {
         import_name: String,
     },
 
+    /// A fully-qualified path (e.g. `std::collections::HashMap`) written out
+    /// repeatedly — a `use`/import alias would shorten the repeated call sites.
+    RepeatedQualifiedPath {
+        path: String,
+        count: usize,
+        file_name: String,
+    },
+
     /// Inconsistent error handling — mix of patterns in the same module.
     InconsistentErrorHandling {
         file_name: String,
@@ -1087,6 +1095,7 @@ impl FindingKind {
 
             FindingKind::UnusedImport { .. }
             | FindingKind::InconsistentErrorHandling { .. }
+            | FindingKind::RepeatedQualifiedPath { .. }
             | FindingKind::TechDebtComment { .. } => "code_quality",
 
             FindingKind::CloneInLoop { .. }
@@ -1230,6 +1239,7 @@ impl FindingKind {
             FindingKind::HashMapWithSequentialKeys { .. } => "HSK=hashmap-seq-keys",
             FindingKind::ExcessiveCollectIterate { .. } => "CI=collect-iterate",
             FindingKind::UnusedImport { .. } => "UI=unused-import",
+            FindingKind::RepeatedQualifiedPath { .. } => "RQP=repeated-qualified-path",
             FindingKind::InconsistentErrorHandling { .. } => "IEH=inconsistent-error",
             FindingKind::TechDebtComment { .. } => "TD=tech-debt",
             FindingKind::CloneInLoop { .. } => "CIL=clone-in-loop",

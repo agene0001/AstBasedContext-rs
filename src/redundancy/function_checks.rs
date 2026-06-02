@@ -8,6 +8,7 @@ use super::helpers::extract_tokens_set;
 use super::helpers::jaccard_sets;
 use super::helpers::normalize_tokens_set;
 use super::types::{Tier, FindingKind, Finding};
+use crate::types::Language;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 1: Passthrough wrappers
@@ -61,7 +62,7 @@ pub(super) fn find_passthroughs(
         };
 
         // ── Rust-specific false-positive filters ────────────────────────
-        if func.language == crate::types::Language::Rust {
+        if func.language == Language::Rust {
             // FP #2: `impl Default for X { fn default() -> Self { Self::new() } }`
             // This is the idiomatic Rust pattern — the Default trait requires it.
             if func.name == "default"
@@ -167,8 +168,8 @@ fn should_skip_near_duplicate(node_a: &GraphNode, node_b: &GraphNode) -> bool {
     };
 
     // Only apply to Rust code
-    if func_a.language != crate::types::Language::Rust
-        || func_b.language != crate::types::Language::Rust
+    if func_a.language != Language::Rust
+        || func_b.language != Language::Rust
     {
         return false;
     }

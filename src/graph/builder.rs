@@ -589,6 +589,36 @@ impl GraphBuilder {
                         );
                     }
                 }
+
+                // Function-reference arguments: a bare-identifier argument that
+                // names a known function (e.g. `.map(canonical_kind)`,
+                // `register(handler)`) is a *use* of that function — link it so it
+                // isn't seen as uncalled and shows up in callers. Language-agnostic:
+                // uses the args every parser already extracts. Variables never match
+                // a function name, so they produce no edge.
+                if let Some(from) = caller_idx {
+                    for arg in &call.args {
+                        let a = arg.trim();
+                        let is_ident = a.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                            && a.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_');
+                        if !is_ident || a == called_name.as_str() {
+                            continue;
+                        }
+                        if let Some(&to) = global_func_lookup.get(a).and_then(|v| v.first()) {
+                            if from != to {
+                                graph.add_edge(
+                                    from,
+                                    to,
+                                    EdgeKind::Calls {
+                                        line_number: call.line_number,
+                                        args: Vec::new(),
+                                        full_call_name: a.to_string(),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
             }
 
             // ── INHERITS resolution ─────────────────────────────────────

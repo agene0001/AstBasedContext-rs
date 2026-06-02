@@ -1,6 +1,7 @@
 use crate::types::node::GraphNode;
 use super::context::AnalysisContext;
 use super::types::{Tier, FindingKind, Finding};
+use std::collections::HashMap;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 79: High blast radius
@@ -78,7 +79,7 @@ pub(super) fn detect_misplaced_functions(
         }
 
         let own_file = func.path.to_string_lossy().to_string();
-        let mut file_interactions: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut file_interactions: HashMap<String, usize> = HashMap::new();
 
         // Count interactions with callers
         for (_, caller_node) in ctx.get_callers_of(idx) {
@@ -137,7 +138,7 @@ pub(super) fn detect_implicit_modules(
     findings: &mut Vec<Finding>,
 ) {
     // For each pair of files, count cross-file call edges
-    let mut cross_file_calls: std::collections::HashMap<(String, String), Vec<String>> = std::collections::HashMap::new();
+    let mut cross_file_calls: HashMap<(String, String), Vec<String>> = HashMap::new();
 
     for &(idx, node) in &ctx.functions {
         let func = match node {

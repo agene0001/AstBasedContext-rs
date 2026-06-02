@@ -235,3 +235,131 @@ pub(super) fn detect_tech_debt_comments(
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Check: Repeated fully-qualified path — would shorten with a `use`/import alias
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(super) fn detect_repeated_qualified_paths(
+    ctx: &AnalysisContext,
+    findings: &mut Vec<Finding>,
+) {
+    use std::collections::HashMap;
+
+    // file -> (importable path -> (count, a representative node index))
+    let mut per_file: HashMap<String, HashMap<String, (usize, usize)>> = HashMap::new();
+
+    for &(idx, node) in &ctx.functions {
+        let func = match node {
+            GraphNode::Function(f) => f,
+            _ => continue,
+        };
+        let src = match &func.source {
+            Some(s) => s,
+            None => continue,
+        };
+        let file = func.path.to_string_lossy().to_string();
+        let lower = file.to_lowercase();
+        // Skip test/fixture/example files.
+        if lower.split('/').any(|seg| {
+            matches!(seg, "tests" | "test" | "examples" | "fixtures") || seg.starts_with("test_project")
+        }) || lower.ends_with("_test.rs")
+            || lower.contains("fixture")
+        {
+            continue;
+        }
+        let entry = per_file.entry(file).or_default();
+        for path in qualified_paths(src) {
+            entry.entry(path).or_insert((0, idx.index())).0 += 1;
+        }
+    }
+
+    // 3+ uses of a long qualified path is enough to be worth a `use` alias. A path
+    // that were already imported would appear in its SHORT form, so a recurring
+    // LONG form inherently means it isn't aliased.
+    const THRESHOLD: usize = 3;
+    for (file, paths) in &per_file {
+        let file_name = std::path::Path::new(file)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| file.clone());
+        for (path, &(count, node_idx)) in paths {
+            if count >= THRESHOLD {
+                findings.push(Finding {
+                    tier: Tier::Low,
+                    kind: FindingKind::RepeatedQualifiedPath {
+                        path: path.clone(),
+                        count,
+                        file_name: file_name.clone(),
+                    },
+                    node_indices: vec![node_idx],
+                    description: format!(
+                        "`{}` is written out {} times in `{}` — add `use {};` and use the short name.",
+                        path, count, file_name, path,
+                    ),
+                });
+            }
+        }
+    }
+}
+
+/// Extract fully-qualified paths (`a::b::c`, 3+ segments) from source, each
+/// reduced to its importable prefix (truncated after the last Type-cased segment;
+/// an all-lowercase path is itself the importable function/module).
+fn qualified_paths(src: &str) -> Vec<String> {
+    let b = src.as_bytes();
+    let n = b.len();
+    let is_ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < n {
+        let start_ok = (b[i].is_ascii_alphabetic() || b[i] == b'_')
+            && (i == 0 || (!is_ident(b[i - 1]) && b[i - 1] != b':'));
+        if !start_ok {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut segments = 0;
+        loop {
+            let seg_start = i;
+            while i < n && is_ident(b[i]) {
+                i += 1;
+            }
+            if i == seg_start {
+                break;
+            }
+            segments += 1;
+            if i + 1 < n && b[i] == b':' && b[i + 1] == b':' {
+                i += 2;
+            } else {
+                break;
+            }
+        }
+        if segments >= 3 {
+            let path = &src[start..i];
+            let first = path.split("::").next().unwrap_or("");
+            // self::/Self::/super:: refer to local scope — not import-worthy.
+            if !matches!(first, "self" | "Self" | "super") {
+                out.push(importable_prefix(path));
+            }
+        }
+    }
+    out
+}
+
+/// The importable unit of a path: everything up to and including the last
+/// Type-cased (uppercase-initial) segment, e.g. `std::collections::HashMap::new`
+/// → `std::collections::HashMap`. An all-lowercase path is returned whole.
+fn importable_prefix(path: &str) -> String {
+    let segs: Vec<&str> = path.split("::").collect();
+    // First Type-cased segment is the type; later segments are usually
+    // variants/methods/associated items (`Error::Graph`, `HashMap::new`).
+    match segs
+        .iter()
+        .position(|s| s.chars().next().is_some_and(|c| c.is_ascii_uppercase()))
+    {
+        Some(pos) => segs[..=pos].join("::"),
+        None => path.to_string(),
+    }
+}

@@ -6,6 +6,8 @@ use std::collections::HashSet;
 use super::context::AnalysisContext;
 use super::helpers::p_min_len;
 use super::types::{Tier, FindingKind, Finding};
+use petgraph::Direction;
+use std::path::Path;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 19: God class/module — too many methods or functions in one place
@@ -19,7 +21,7 @@ pub(super) fn detect_god_class(
         let (name, node_type) = match &ctx.graph.graph[idx] {
             GraphNode::Class(c) => (c.name.clone(), "Class"),
             GraphNode::File(f) => {
-                let name = std::path::Path::new(&f.path)
+                let name = Path::new(&f.path)
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| f.path.to_string_lossy().to_string());
@@ -152,7 +154,7 @@ pub(super) fn detect_circular_dependencies(
             .map(|&pos| {
                 let file_idx = file_indices[pos];
                 match &ctx.graph.graph[file_idx] {
-                    GraphNode::File(f) => std::path::Path::new(&f.path)
+                    GraphNode::File(f) => Path::new(&f.path)
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_else(|| f.path.to_string_lossy().to_string()),
@@ -291,7 +293,7 @@ pub(super) fn detect_shotgun_surgery(
         }
 
         // Count how many distinct directories (modules) the callers span
-        let own_module = std::path::Path::new(&func.path)
+        let own_module = Path::new(&func.path)
             .parent()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
@@ -300,7 +302,7 @@ pub(super) fn detect_shotgun_surgery(
             .iter()
             .filter_map(|(_, caller_node)| {
                 if let GraphNode::Function(cf) = caller_node {
-                    let module = std::path::Path::new(&cf.path)
+                    let module = Path::new(&cf.path)
                         .parent()
                         .map(|p| p.to_string_lossy().to_string())
                         .unwrap_or_default();
@@ -360,11 +362,42 @@ pub(super) fn detect_dead_code(
     .copied()
     .collect();
 
+    // The call graph misses calls inside macros (format!/println!), functions
+    // passed by value (.map(f), `f as ptr`), and dynamic dispatch — so CALLS edges
+    // alone produce many false "dead code" reports. Guard with a textual reference
+    // check: record, per identifier, which functions' bodies mention it; a function
+    // is only "dead" if NO OTHER function references its name. Precision over recall.
+    let mut referenced_in: HashMap<&str, Vec<NodeIndex>> = HashMap::new();
+    for &(fidx, fnode) in &ctx.functions {
+        if let GraphNode::Function(f) = fnode {
+            if let Some(src) = &f.source {
+                let mut seen: HashSet<&str> = HashSet::new();
+                for tok in src.split(|c: char| !c.is_alphanumeric() && c != '_') {
+                    if tok.len() >= 2 && seen.insert(tok) {
+                        referenced_in.entry(tok).or_default().push(fidx);
+                    }
+                }
+            }
+        }
+    }
+
     for &(idx, node) in &ctx.functions {
         let func = match node {
             GraphNode::Function(f) => f,
             _ => continue,
         };
+
+        // Skip test/fixture/example files — a user's fixtures and test helpers
+        // aren't "dead code" worth reporting.
+        let path_lower = func.path.to_string_lossy().to_lowercase();
+        if path_lower.split('/').any(|seg| {
+            matches!(seg, "tests" | "test" | "examples" | "fixtures" | "grammars")
+                || seg.starts_with("test_project")
+        }) || path_lower.ends_with("_test.rs")
+            || path_lower.contains("fixture")
+        {
+            continue;
+        }
 
         // Skip entry points and test/setup ctx.functions
         let lower = func.name.to_lowercase();
@@ -388,7 +421,11 @@ pub(super) fn detect_dead_code(
             }
         }
 
-        if ctx.caller_indices(idx).is_empty() {
+        if ctx.caller_indices(idx).is_empty()
+            && !referenced_in
+                .get(func.name.as_str())
+                .is_some_and(|v| v.iter().any(|&i| i != idx))
+        {
             findings.push(Finding {
                 tier: Tier::Critical,
                 kind: FindingKind::DeadCode {
@@ -694,7 +731,7 @@ pub(super) fn detect_refused_bequest(
 
         // Find parent class via INHERITS edge
         let parent_names: Vec<String> = ctx.graph.graph
-            .edges_directed(*child_idx, petgraph::Direction::Outgoing)
+            .edges_directed(*child_idx, Direction::Outgoing)
             .filter(|e| matches!(e.weight(), EdgeKind::Inherits))
             .map(|e| ctx.graph.graph[e.target()].name().to_string())
             .collect();
@@ -831,7 +868,7 @@ pub(super) fn detect_inappropriate_intimacy(
             _ => continue,
         };
 
-        for edge in ctx.graph.graph.edges_directed(idx, petgraph::Direction::Outgoing) {
+        for edge in ctx.graph.graph.edges_directed(idx, Direction::Outgoing) {
             if !matches!(edge.weight(), EdgeKind::Calls { .. }) {
                 continue;
             }
@@ -1211,7 +1248,7 @@ pub(super) fn detect_unstable_dependency(
     paths.sort();
     let mut file_stem_to_path: HashMap<String, (String, String)> = HashMap::new();
     for path in paths {
-        let p = std::path::Path::new(path);
+        let p = Path::new(path);
         if let (Some(stem), Some(name)) = (p.file_stem(), p.file_name()) {
             file_stem_to_path.insert(
                 stem.to_string_lossy().to_string(),
@@ -1224,7 +1261,7 @@ pub(super) fn detect_unstable_dependency(
         if let GraphNode::File(fd) = node {
             let own_path = fd.path.display().to_string();
 
-            for edge in ctx.graph.graph.edges_directed(idx, petgraph::Direction::Outgoing) {
+            for edge in ctx.graph.graph.edges_directed(idx, Direction::Outgoing) {
                 if !matches!(edge.weight(), EdgeKind::Imports { .. }) {
                     continue;
                 }

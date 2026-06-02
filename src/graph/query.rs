@@ -4,6 +4,9 @@ use super::code_graph::CodeGraph;
 use super::structural;
 use crate::types::node::GraphNode;
 use crate::types::EdgeKind;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use crate::types::Language;
 
 impl CodeGraph {
     /// Get all functions called by the function at `idx`.
@@ -32,7 +35,7 @@ impl CodeGraph {
     pub fn get_inheritance_chain(&self, idx: NodeIndex) -> Vec<(NodeIndex, &GraphNode)> {
         let mut chain = Vec::new();
         let mut current = idx;
-        let mut visited = std::collections::HashSet::new();
+        let mut visited = HashSet::new();
         visited.insert(current);
 
         loop {
@@ -156,7 +159,7 @@ impl CodeGraph {
     /// Build a full call chain from a function (BFS traversal of CALLS edges).
     pub fn get_call_chain(&self, idx: NodeIndex, max_depth: usize) -> Vec<(NodeIndex, &GraphNode, usize)> {
         let mut result = Vec::new();
-        let mut visited = std::collections::HashSet::new();
+        let mut visited = HashSet::new();
         let mut queue = std::collections::VecDeque::new();
 
         visited.insert(idx);
@@ -180,7 +183,7 @@ impl CodeGraph {
     /// Returns all transitive callers with their BFS depth.
     pub fn get_transitive_callers(&self, idx: NodeIndex, max_depth: usize) -> Vec<(NodeIndex, &GraphNode, usize)> {
         let mut result = Vec::new();
-        let mut visited = std::collections::HashSet::new();
+        let mut visited = HashSet::new();
         let mut queue = std::collections::VecDeque::new();
 
         visited.insert(idx);
@@ -219,8 +222,8 @@ impl CodeGraph {
     /// (see the [`structural`](crate::graph::structural) module). One parser is
     /// reused per language. Nodes without a snippet or grammar are skipped.
     pub fn compute_structural_fingerprints(&mut self) {
-        use std::collections::HashMap;
-        use crate::types::Language;
+        use HashMap;
+        use Language;
 
         let mut parsers: HashMap<Language, Option<tree_sitter::Parser>> = HashMap::new();
         // Collect first (immutable borrow of the graph), then insert.
@@ -271,8 +274,8 @@ impl CodeGraph {
         label_filter: Option<&str>,
         min_lines: usize,
     ) -> Vec<Vec<(NodeIndex, &GraphNode)>> {
-        use std::collections::HashMap;
-        use crate::types::Language;
+        use HashMap;
+        use Language;
 
         // Collect annotated nodes with their source.
         let candidates: Vec<(NodeIndex, &GraphNode, &str)> = self
@@ -385,10 +388,10 @@ impl CodeGraph {
 const STRUCTURAL_SIMILARITY_THRESHOLD: f64 = 0.75;
 
 /// Resolve a node's language from its file path extension.
-fn node_language(node: &GraphNode) -> Option<crate::types::Language> {
+fn node_language(node: &GraphNode) -> Option<Language> {
     let (path, _, _) = node.location();
     let ext = std::path::Path::new(&path).extension()?.to_str()?;
-    crate::types::Language::from_extension(ext)
+    Language::from_extension(ext)
 }
 
 /// Decide whether candidates `i` and `j` are similar enough to group.
@@ -399,7 +402,7 @@ fn node_language(node: &GraphNode) -> Option<crate::types::Language> {
 fn snippets_similar(
     candidates: &[(NodeIndex, &GraphNode, &str)],
     fingerprints: &[Option<structural::Fingerprint>],
-    idf: &std::collections::HashMap<u64, f64>,
+    idf: &HashMap<u64, f64>,
     i: usize,
     j: usize,
 ) -> bool {
@@ -430,7 +433,7 @@ fn extract_tokens(source: &str) -> Vec<&str> {
 
 /// Jaccard similarity of two token sets.
 fn token_similarity(a: &[&str], b: &[&str]) -> f64 {
-    use std::collections::HashSet;
+    use HashSet;
     let set_a: HashSet<&str> = a.iter().copied().collect();
     let set_b: HashSet<&str> = b.iter().copied().collect();
     let intersection = set_a.intersection(&set_b).count();

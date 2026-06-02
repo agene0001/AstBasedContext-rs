@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use super::language::Language;
 
 /// Span within a source file (1-based lines, 0-based columns).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct SourceSpan {
     pub start_line: u32,
     pub end_line: u32,
@@ -107,6 +107,39 @@ pub struct FunctionData {
     /// Whether this function contains try/catch/except error handling.
     #[serde(default)]
     pub has_error_handling: bool,
+}
+
+impl FunctionData {
+    /// A `FunctionData` with every optional field defaulted (empty/false/None),
+    /// for use with struct-update syntax so each parser's `find_functions` only
+    /// spells out the fields it actually sets:
+    /// `FunctionData { name, path, span, args, ..FunctionData::template(lang) }`.
+    pub fn template(language: Language) -> Self {
+        Self {
+            name: String::new(),
+            path: PathBuf::new(),
+            span: SourceSpan::default(),
+            args: Vec::new(),
+            arg_types: Vec::new(),
+            return_type: None,
+            visibility: None,
+            is_static: false,
+            is_abstract: false,
+            cyclomatic_complexity: 0,
+            decorators: Vec::new(),
+            context: None,
+            context_type: None,
+            class_context: None,
+            language,
+            is_dependency: false,
+            source: None,
+            docstring: None,
+            is_async: false,
+            todo_comments: Vec::new(),
+            raises: Vec::new(),
+            has_error_handling: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

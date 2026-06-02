@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use super::context::AnalysisContext;
 use super::types::{Tier, FindingKind, Finding};
+use petgraph::Direction;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 44: Hub module
@@ -19,7 +20,7 @@ pub(super) fn detect_hub_module(
     for &(file_idx, file_node) in &ctx.files {
         // Count outgoing IMPORTS edges
         let import_count = ctx.graph.graph
-            .edges_directed(file_idx, petgraph::Direction::Outgoing)
+            .edges_directed(file_idx, Direction::Outgoing)
             .filter(|e| matches!(e.weight(), EdgeKind::Imports { .. }))
             .count();
 
@@ -68,7 +69,7 @@ pub(super) fn detect_orphan_module(
 
         // Check if any other file imports from this file (only count IMPORTS edges, not CONTAINS)
         let incoming = ctx.graph.graph
-            .edges_directed(file_idx, petgraph::Direction::Incoming)
+            .edges_directed(file_idx, Direction::Incoming)
             .filter(|e| matches!(e.weight(), EdgeKind::Imports { .. } | EdgeKind::Calls { .. }))
             .count();
 
@@ -194,7 +195,7 @@ pub(super) fn detect_circular_package_dependency(
                 None => continue,
             };
 
-            for edge in ctx.graph.graph.edges_directed(idx, petgraph::Direction::Outgoing) {
+            for edge in ctx.graph.graph.edges_directed(idx, Direction::Outgoing) {
                 if !matches!(edge.weight(), EdgeKind::Calls { .. }) {
                     continue;
                 }
@@ -207,7 +208,7 @@ pub(super) fn detect_circular_package_dependency(
 
                     if caller_dir != callee_dir {
                         if let (Some(&src), Some(&dst)) = (dir_indices.get(&caller_dir), dir_indices.get(&callee_dir)) {
-                            if !dir_graph.edges_directed(src, petgraph::Direction::Outgoing)
+                            if !dir_graph.edges_directed(src, Direction::Outgoing)
                                 .any(|e| e.target() == dst) {
                                 dir_graph.add_edge(src, dst, ());
                             }

@@ -126,25 +126,13 @@ impl RubyParser {
                     },
                     args,
                     // Ruby has no explicit type annotations
-                    arg_types: Vec::new(),
-                    return_type: None,
                     // Ruby has no explicit visibility keywords in the same way
-                    visibility: None,
                     is_static: func_node.kind() == "singleton_method",
-                    is_abstract: false,
                     cyclomatic_complexity: complexity,
-                    decorators: Vec::new(),
                     context: ctx.as_ref().map(|(n, _, _)| n.clone()),
                     context_type: ctx.as_ref().map(|(_, t, _)| t.clone()),
                     class_context: class_ctx.map(|(n, _, _)| n),
-                    language: Language::Ruby,
-                    is_dependency: false,
-                    source: None,
-                    docstring: None,
-                    is_async: false,
-                    todo_comments: vec![],
-                    raises: vec![],
-                    has_error_handling: false,
+                    ..FunctionData::template(Language::Ruby)
                 });
         });
         functions

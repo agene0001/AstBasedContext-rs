@@ -10,6 +10,7 @@ use crate::types::{FileParseResult, Language};
 
 use super::common::*;
 use super::LanguageParser;
+use std::collections::HashMap;
 
 // Tree-sitter query strings — ported directly from PY_QUERIES in the Python source.
 const Q_IMPORTS: &str = r#"
@@ -186,14 +187,12 @@ impl PythonParser {
                     context: ctx.as_ref().map(|(n, _, _)| n.clone()),
                     context_type: ctx.as_ref().map(|(_, t, _)| t.clone()),
                     class_context: class_ctx.map(|(n, _, _)| n),
-                    language: Language::Python,
-                    is_dependency: false,
-                    source: None,
                     docstring,
                     is_async,
                     todo_comments,
                     raises,
                     has_error_handling,
+                    ..FunctionData::template(Language::Python)
                 });
         });
 
@@ -255,23 +254,11 @@ impl PythonParser {
                     },
                     args,
                     arg_types,
-                    return_type: None,
-                    visibility: None,
-                    is_static: false,
-                    is_abstract: false,
                     cyclomatic_complexity: 1,
-                    decorators: Vec::new(),
                     context: ctx.as_ref().map(|(n, _, _)| n.clone()),
                     context_type: ctx.as_ref().map(|(_, t, _)| t.clone()),
                     class_context: class_ctx.map(|(n, _, _)| n),
-                    language: Language::Python,
-                    is_dependency: false,
-                    source: None,
-                    docstring: None,
-                    is_async: false,
-                    todo_comments: vec![],
-                    raises: vec![],
-                    has_error_handling: false,
+                    ..FunctionData::template(Language::Python)
                 });
         });
         functions
@@ -912,9 +899,9 @@ fn extract_call_args(call_node: &Node, source: &[u8]) -> Vec<String> {
 /// Pre-scan Python files to build an imports_map: name → list of file paths.
 pub fn pre_scan_python(
     files: &[std::path::PathBuf],
-) -> std::collections::HashMap<String, Vec<String>> {
-    let mut imports_map: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
+) -> HashMap<String, Vec<String>> {
+    let mut imports_map: HashMap<String, Vec<String>> =
+        HashMap::new();
     let ts_lang: TsLanguage = tree_sitter_python::LANGUAGE.into();
     let query_str = r#"
         (class_definition name: (identifier) @name)

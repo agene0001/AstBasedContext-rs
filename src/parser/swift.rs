@@ -185,26 +185,16 @@ impl SwiftParser {
                     end_col: func_node.end_position().column as u32,
                 },
                 args: extract_swift_params(&func_node, source),
-                arg_types: Vec::new(),
                 return_type: func_node
                     .child_by_field_name("return_type")
                     .map(|r| get_node_text(&r, source).to_string()),
                 visibility,
                 is_static: has_modifier(&func_node, source, "static"),
-                is_abstract: false,
                 cyclomatic_complexity: complexity,
-                decorators: Vec::new(),
                 context: ctx.as_ref().map(|(n, _, _)| n.clone()),
                 context_type: ctx.as_ref().map(|(_, t, _)| t.clone()),
-                class_context: None,
-                language: Language::Swift,
-                is_dependency: false,
-                source: None,
-                docstring: None,
                 is_async,
-                todo_comments: vec![],
-                raises: vec![],
-                has_error_handling: false,
+                    ..FunctionData::template(Language::Swift)
             });
         }
         functions

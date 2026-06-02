@@ -1,6 +1,6 @@
 [package]
 name = "ast_context"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 description = "AST/CST-based code graph analysis — index codebases, find dead code, detect redundancy, and expose everything via an MCP server for AI assistants"
 license = "MIT"
@@ -54,20 +54,20 @@ tree-sitter-language = "0.1"
 tree-sitter-swift = "0.7.3"
 # TODO: Add tree-sitter-kotlin (currently skipped due to dependency issues: crates.io version targets tree-sitter <0.23, and vendoring parser.c is impractical due to 23MB size)
 # tree-sitter-dart: vendored via grammars/dart/ (crates.io version targets tree-sitter <0.26)
-thiserror = "2"
+thiserror = "2.0.18"
 ignore = "0.4.25"
 rayon = "1.12"
-streaming-iterator = "0.1"
+streaming-iterator = "0.1.9"
 notify-debouncer-full = "0.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-notify = { version = "7", features = ["macos_fsevent"] }
+notify = { version = "8.2.0", features = ["macos_fsevent"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-notify = { version = "7" }
+notify = { version = "8.2.0" }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = "0.2.186"
 
 [build-dependencies]
 cc = "1.2.63"

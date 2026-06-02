@@ -612,6 +612,11 @@ pub fn analyze(graph: &CodeGraph, config: &AnalysisConfig) -> Vec<Finding> {
         code_quality::detect_tech_debt_comments(&ctx, &mut findings);
     }
 
+    // ── Repeated fully-qualified path → suggest `use` alias (Low) ───────
+    if cat_ok("code_quality") && !skip("code_quality") && !skip("detect_repeated_qualified_paths") {
+        code_quality::detect_repeated_qualified_paths(&ctx, &mut findings);
+    }
+
     // ── Optimization Suggestions ──────────────────────────────────────
 
     // ── Check 103: Clone/allocation in loop (Medium) ──────────────────

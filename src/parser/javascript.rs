@@ -10,6 +10,7 @@ use crate::types::{FileParseResult, Language};
 
 use super::common::*;
 use super::LanguageParser;
+use std::collections::HashMap;
 
 // Tree-sitter query strings for JavaScript.
 const Q_FUNCTIONS: &str = r#"
@@ -148,26 +149,15 @@ impl JavaScriptParser {
                 },
                 args,
                 arg_types,
-                return_type: None,
-                visibility: None,
-                is_static: false,
-                is_abstract: false,
                 cyclomatic_complexity: complexity,
-                decorators: Vec::new(),
                 context: ctx.as_ref().map(|(n, _, _)| n.clone()),
                 context_type: ctx.as_ref().map(|(_, t, _)| t.clone()),
                 class_context: class_ctx.map(|(n, _, _)| n),
-                language: Language::JavaScript,
-                is_dependency: false,
-                source: None,
-                docstring: None,
                 is_async: func_node.kind().contains("async") || {
                     let prev = func_node.prev_sibling();
                     prev.is_some_and(|n| get_node_text(&n, source) == "async")
                 },
-                todo_comments: vec![],
-                raises: vec![],
-                has_error_handling: false,
+                    ..FunctionData::template(Language::JavaScript)
             });
         }
         functions
@@ -597,9 +587,9 @@ fn extract_js_call_args(call_node: &Node, source: &[u8]) -> Vec<String> {
 /// Pre-scan JavaScript files to build an imports_map: name -> list of file paths.
 pub fn pre_scan_javascript(
     files: &[std::path::PathBuf],
-) -> std::collections::HashMap<String, Vec<String>> {
-    let mut imports_map: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
+) -> HashMap<String, Vec<String>> {
+    let mut imports_map: HashMap<String, Vec<String>> =
+        HashMap::new();
     let ts_lang: TsLanguage = tree_sitter_javascript::LANGUAGE.into();
     let query_str = r#"
         (class_declaration name: (identifier) @name)

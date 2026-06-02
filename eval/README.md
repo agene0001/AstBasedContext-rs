@@ -89,6 +89,24 @@ the interesting signal becomes answer *quality* — hence the judge. The *precis
 of the suggestions themselves is measured separately and for free (no API) by
 `cargo run --example calibrate_threshold`.
 
+## Precision audit (`fp_audit.py`)
+
+A separate tool that measures the **false-positive rate** of redundancy findings.
+The cheap, high-volume false positives (dead code via macro/dynamic-dispatch
+calls, untested-public noise) are already handled structurally in the engine — but
+the pattern-matched optimization checks (`CloneInLoop`, `VecNoPresize`, …) need
+semantic judgment. This samples findings, fetches each one's source, and has an
+LLM grade it TRUE/FALSE positive, reporting precision per check:
+
+```sh
+export GEMINI_API_KEY=...
+uv run fp_audit.py            # default category: optimization
+uv run fp_audit.py redundancy # any analyze_redundancy category
+EVAL_FP_N=40 uv run fp_audit.py
+```
+
+Like the main eval, it's not run by CI (it costs API quota).
+
 ## Caveats
 
 - Token counts come straight from the API response, so they're exact (not the

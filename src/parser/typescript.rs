@@ -9,6 +9,7 @@ use crate::types::{FileParseResult, Language};
 
 use super::common::*;
 use super::LanguageParser;
+use std::collections::HashMap;
 
 const Q_FUNCTIONS: &str = r#"
     (function_declaration
@@ -195,21 +196,14 @@ impl TypeScriptParser {
                 is_static,
                 is_abstract,
                 cyclomatic_complexity: complexity,
-                decorators: Vec::new(),
                 context: ctx.as_ref().map(|(n, _, _)| n.clone()),
                 context_type: ctx.as_ref().map(|(_, t, _)| t.clone()),
                 class_context: class_ctx.map(|(n, _, _)| n),
-                language: Language::TypeScript,
-                is_dependency: false,
-                source: None,
-                docstring: None,
                 is_async: f_node.kind().contains("async") || {
                     let prev = f_node.prev_sibling();
                     prev.is_some_and(|n| get_node_text(&n, source) == "async")
                 },
-                todo_comments: vec![],
-                raises: vec![],
-                has_error_handling: false,
+                    ..FunctionData::template(Language::TypeScript)
             });
         }
         functions
@@ -458,8 +452,8 @@ fn extract_ts_heritage(class_node: &Node, source: &[u8]) -> Vec<String> {
     bases
 }
 
-pub fn pre_scan_typescript(files: &[std::path::PathBuf]) -> std::collections::HashMap<String, Vec<String>> {
-    let mut map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+pub fn pre_scan_typescript(files: &[std::path::PathBuf]) -> HashMap<String, Vec<String>> {
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
     let ts_lang: TsLanguage = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
     let query_str = r#"
         (class_declaration name: (type_identifier) @name)

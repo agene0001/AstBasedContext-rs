@@ -1,6 +1,7 @@
 use crate::types::node::GraphNode;
 use super::context::AnalysisContext;
 use super::types::{Tier, FindingKind, Finding};
+use std::collections::HashSet;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 82: Unstable public API
@@ -120,7 +121,7 @@ pub(super) fn detect_leaky_abstraction(
     findings: &mut Vec<Finding>,
 ) {
     // Collect names of internal/private types
-    let stdlib_types: std::collections::HashSet<&str> = [
+    let stdlib_types: HashSet<&str> = [
         "String", "str", "Vec", "Option", "Result", "HashMap", "HashSet",
         "Box", "Arc", "Rc", "Mutex", "RwLock", "Cell", "RefCell",
         "bool", "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128",
@@ -131,7 +132,7 @@ pub(super) fn detect_leaky_abstraction(
         "error", "byte", "rune", "interface",
     ].iter().copied().collect();
 
-    let mut internal_types: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut internal_types: HashSet<String> = HashSet::new();
 
     for idx in ctx.graph.graph.node_indices() {
         let node = &ctx.graph.graph[idx];

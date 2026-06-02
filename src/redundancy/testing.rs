@@ -31,9 +31,26 @@ pub(super) fn detect_untested_public_functions(
             continue;
         }
 
+        // Skip test/fixture/example files — their functions don't need "tests".
+        let path_lower = func.path.to_string_lossy().to_lowercase();
+        if path_lower.split('/').any(|seg| {
+            matches!(seg, "tests" | "test" | "examples" | "fixtures") || seg.starts_with("test_project")
+        }) || path_lower.ends_with("_test.rs")
+            || path_lower.contains("fixture")
+        {
+            continue;
+        }
+
         // Skip trivial ctx.functions (< 5 lines)
         let line_count = func.source.as_ref().map(|s| s.lines().count()).unwrap_or(0);
         if line_count < 5 {
+            continue;
+        }
+
+        // Raise the bar: only nag about functions with real branching logic to
+        // test. A linear public function (cc < 3) rarely warrants a dedicated test,
+        // and flagging every one of them is high-volume, low-value noise.
+        if func.cyclomatic_complexity < 3 {
             continue;
         }
 
@@ -56,7 +73,7 @@ pub(super) fn detect_untested_public_functions(
 
         let caller_count = ctx.caller_indices(idx).len();
         findings.push(Finding {
-            tier: Tier::High,
+            tier: Tier::Low, // coverage gaps are informational, not high-severity
             kind: FindingKind::UntestedPublicFunction {
                 function_name: func.name.clone(),
                 file_name: func.path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default(),

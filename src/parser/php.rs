@@ -147,18 +147,10 @@ impl PhpParser {
                     is_static,
                     is_abstract,
                     cyclomatic_complexity: complexity,
-                    decorators: Vec::new(),
                     context: ctx.as_ref().map(|(n, _, _)| n.clone()),
                     context_type: ctx.as_ref().map(|(_, t, _)| t.clone()),
                     class_context: class_ctx.map(|(n, _, _)| n),
-                    language: Language::Php,
-                    is_dependency: false,
-                    source: None,
-                    docstring: None,
-                    is_async: false,
-                    todo_comments: vec![],
-                    raises: vec![],
-                    has_error_handling: false,
+                    ..FunctionData::template(Language::Php)
                 });
         });
         functions

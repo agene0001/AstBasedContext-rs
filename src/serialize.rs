@@ -6,6 +6,8 @@ use crate::graph::CodeGraph;
 
 use petgraph::visit::EdgeRef;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs::File;
 
 /// A serializable node entry for JSONL export.
 #[derive(Serialize, Deserialize)]
@@ -34,7 +36,7 @@ pub fn export_jsonl(graph: &CodeGraph, output_dir: &Path) -> Result<()> {
 
     // Export nodes
     let nodes_path = output_dir.join("nodes.jsonl");
-    let nodes_file = std::fs::File::create(&nodes_path).map_err(|e| Error::Io {
+    let nodes_file = File::create(&nodes_path).map_err(|e| Error::Io {
         path: nodes_path.clone(),
         source: e,
     })?;
@@ -60,7 +62,7 @@ pub fn export_jsonl(graph: &CodeGraph, output_dir: &Path) -> Result<()> {
 
     // Export edges
     let edges_path = output_dir.join("edges.jsonl");
-    let edges_file = std::fs::File::create(&edges_path).map_err(|e| Error::Io {
+    let edges_file = File::create(&edges_path).map_err(|e| Error::Io {
         path: edges_path.clone(),
         source: e,
     })?;
@@ -120,7 +122,7 @@ pub fn export_json(graph: &CodeGraph, output_path: &Path) -> Result<()> {
         .collect();
 
     let full = FullGraph { nodes, edges };
-    let file = std::fs::File::create(output_path).map_err(|e| Error::Io {
+    let file = File::create(output_path).map_err(|e| Error::Io {
         path: output_path.to_path_buf(),
         source: e,
     })?;
@@ -132,13 +134,13 @@ pub fn export_json(graph: &CodeGraph, output_path: &Path) -> Result<()> {
 
 /// Print graph statistics to stdout.
 pub fn print_stats(graph: &CodeGraph) {
-    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut counts: HashMap<&str, usize> = HashMap::new();
     for idx in graph.graph.node_indices() {
         let label = graph.graph[idx].label();
         *counts.entry(label).or_default() += 1;
     }
 
-    let mut edge_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut edge_counts: HashMap<&str, usize> = HashMap::new();
     for edge in graph.graph.edge_references() {
         let label = edge.weight().label();
         *edge_counts.entry(label).or_default() += 1;

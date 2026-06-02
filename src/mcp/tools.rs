@@ -11,6 +11,10 @@ use crate::GraphBuilder;
 use serde_json::json;
 
 use super::protocol::{ToolContent, ToolDefinition, ToolResult};
+use std::collections::HashSet;
+use std::path::Path;
+use petgraph::graph::NodeIndex;
+use crate::types::node::FieldDecl;
 
 /// Shared server state.
 pub struct ServerState {
@@ -151,11 +155,16 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             name: "analyze_redundancy".to_string(),
             description: "Tiered redundancy + code-health report: passthrough wrappers, near/structural \
                 duplicates, merge/split candidates, dead code, and anti-patterns, ranked Critical>High>Medium>Low. \
-                For dead code pass category='anti_patterns'. Tags: tiers [C]/[H]/[M]/[L]; types e.g. \
-                [PT]=passthrough [ND]=near-dup [DC]=dead-code. Needs annotate=true on index.".to_string(),
+                For dead code pass category='anti_patterns'. Scans the WHOLE repo by default — pass \
+                path='src/foo.rs' (or a dir) to scope it to one file cheaply. Tags: tiers [C]/[H]/[M]/[L]; \
+                types e.g. [PT]=passthrough [ND]=near-dup [DC]=dead-code. Needs annotate=true on index.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Scope findings to this file or directory (e.g. 'src/walker.rs') — avoids the whole-repo report"
+                    },
                     "category": {
                         "type": "string",
                         "description": "Restrict to one category of findings",
@@ -193,8 +202,7 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                 name and resolves the best match (listing any alternatives), so call it DIRECTLY with \
                 the name you want — no find_code lookup first. To inspect SEVERAL symbols at once, pass \
                 a comma-separated list (e.g. 'CodeGraph, GraphNode, build') — one call instead of many. \
-                Resolves a struct field or enum variant to its owning type. depth>1 adds the transitive \
-                call chain + blast radius.".to_string(),
+                Resolves a struct field or enum variant to its owning type.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -206,10 +214,6 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                         "type": "string",
                         "description": "Type filter — only needed to disambiguate when several symbols share the name (the result lists them). Usually omit it.",
                         "enum": ["Function", "Class", "Struct", "Trait", "Interface", "Enum"]
-                    },
-                    "depth": {
-                        "type": "integer",
-                        "description": "Transitive depth (default 1 = direct only). depth>1 adds the call chain (transitive callees) and blast radius (transitive callers) for impact analysis."
                     },
                     "repository": {
                         "type": "string",
@@ -521,11 +525,11 @@ fn handle_find_code(state: &SharedState, args: &serde_json::Value) -> ToolResult
                 .take(50)
                 .collect()
         };
-        let seen: std::collections::HashSet<_> = filtered.iter().map(|(idx, _)| *idx).collect();
+        let seen: HashSet<_> = filtered.iter().map(|(idx, _)| *idx).collect();
 
         // Struct/class field names and enum variant names aren't node names, so a
         // plain name search misses them. Match them too and return the owning type.
-        let field_str = |f: &crate::types::node::FieldDecl| {
+        let field_str = |f: &FieldDecl| {
             let ty = f.type_annotation.as_deref().map(|t| format!(": {t}")).unwrap_or_default();
             let dv = f.default_value.as_deref().map(|v| format!(" = {v}")).unwrap_or_default();
             format!("field {}{ty}{dv}", f.name)
@@ -563,7 +567,7 @@ fn handle_find_code(state: &SharedState, args: &serde_json::Value) -> ToolResult
             // Steer the model in THIS turn instead of forcing a retry: split the
             // query into word parts and surface the closest-named symbols.
             let mut sugg: Vec<String> = Vec::new();
-            let mut seen_s = std::collections::HashSet::new();
+            let mut seen_s = HashSet::new();
             // Longer word-parts are usually the rarer, more specific ones (e.g.
             // "version" beats "graph") — match them first so the best hint leads.
             let mut parts: Vec<&str> =
@@ -637,7 +641,7 @@ fn handle_get_overview(state: &SharedState, args: &serde_json::Value) -> ToolRes
     let is_file = args
         .get("path")
         .and_then(|v| v.as_str())
-        .is_some_and(|p| std::path::Path::new(p).extension().is_some());
+        .is_some_and(|p| Path::new(p).extension().is_some());
     if is_file {
         handle_get_file_summary(state, args)
     } else {
@@ -649,23 +653,23 @@ fn handle_get_overview(state: &SharedState, args: &serde_json::Value) -> ToolRes
 /// Inherits / Implements): rank flows from a user to the thing it uses, so
 /// heavily-called functions and widely-implemented traits accumulate weight.
 /// This is the ranking behind the repo map (à la Aider's PageRank repo map).
-fn pagerank(graph: &CodeGraph) -> std::collections::HashMap<petgraph::graph::NodeIndex, f64> {
+fn pagerank(graph: &CodeGraph) -> HashMap<NodeIndex, f64> {
     use petgraph::visit::EdgeRef;
     let g = &graph.graph;
     let edge_ok =
         |e: &EdgeKind| matches!(e, EdgeKind::Calls { .. } | EdgeKind::Inherits | EdgeKind::Implements);
     let nodes: Vec<_> = g.node_indices().collect();
     let n = nodes.len().max(1) as f64;
-    let mut rank: std::collections::HashMap<_, f64> =
+    let mut rank: HashMap<_, f64> =
         nodes.iter().map(|&i| (i, 1.0 / n)).collect();
-    let out_deg: std::collections::HashMap<_, usize> = nodes
+    let out_deg: HashMap<_, usize> = nodes
         .iter()
         .map(|&i| (i, g.edges(i).filter(|e| edge_ok(e.weight())).count()))
         .collect();
 
     const DAMPING: f64 = 0.85;
     for _ in 0..20 {
-        let mut next: std::collections::HashMap<_, f64> =
+        let mut next: HashMap<_, f64> =
             nodes.iter().map(|&i| (i, (1.0 - DAMPING) / n)).collect();
         for &i in &nodes {
             let d = out_deg[&i];
@@ -783,7 +787,7 @@ fn handle_get_file_summary(state: &SharedState, args: &serde_json::Value) -> Too
 
     with_graph(state, repo, |graph| {
         // Collect all nodes whose file path ends with the provided path string.
-        let needle = std::path::Path::new(file_path);
+        let needle = Path::new(file_path);
         let mut matches: Vec<&GraphNode> = graph
             .graph
             .node_indices()
@@ -1091,7 +1095,7 @@ fn handle_get_stats(state: &SharedState, args: &serde_json::Value) -> ToolResult
         text.push_str(&format!("  Edges: {}\n", graph.edge_count()));
         text.push_str(&format!("  Annotated: {}\n", graph.has_annotations()));
 
-        let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        let mut counts: HashMap<&str, usize> = HashMap::new();
         for idx in graph.graph.node_indices() {
             let label = graph.graph[idx].label();
             *counts.entry(label).or_default() += 1;
@@ -1242,6 +1246,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         .get("category")
         .and_then(|v| v.as_str())
         .map(String::from);
+    let path_filter = args.get("path").and_then(|v| v.as_str());
     let repo = args.get("repository").and_then(|v| v.as_str());
 
     with_graph(state, repo, |graph| {
@@ -1281,6 +1286,19 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
             .filter(|f| f.tier <= min_tier)
             .collect();
 
+        // Scope to a file/dir if requested: keep only findings involving a node in
+        // that path. Lets an agent ask "redundancy in THIS file" cheaply instead of
+        // getting the whole-repo report.
+        if let Some(pf) = path_filter {
+            filtered.retain(|f| {
+                f.node_indices.iter().any(|&ni| {
+                    graph
+                        .get_node(petgraph::graph::NodeIndex::new(ni))
+                        .is_some_and(|n| n.location().0.contains(pf))
+                })
+            });
+        }
+
         // Normalize each finding's member order: several checks collect node
         // indices from a HashSet, whose iteration order Rust randomizes per
         // process. Sorting here makes the rendered "└─" list deterministic for
@@ -1302,7 +1320,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
             !f.node_indices.is_empty()
                 && f.node_indices.iter().all(|&ni| {
                     graph
-                        .get_node(petgraph::graph::NodeIndex::new(ni))
+                        .get_node(NodeIndex::new(ni))
                         .map(|n| is_secondary_path(&n.location().0))
                         .unwrap_or(false)
                 })
@@ -1320,7 +1338,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         });
 
         if limit_per_type > 0 {
-            let mut counts = std::collections::HashMap::new();
+            let mut counts = HashMap::new();
             filtered.retain(|f| {
                 let count = counts.entry(std::mem::discriminant(&f.kind)).or_insert(0);
                 *count += 1;
@@ -1399,7 +1417,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
             if include_source && source_shown < SOURCE_FINDING_CAP {
                 source_shown += 1;
                 for &ni in &finding.node_indices {
-                    let node_idx = petgraph::graph::NodeIndex::new(ni);
+                    let node_idx = NodeIndex::new(ni);
                     if let Some(node) = graph.get_node(node_idx) {
                         let loc = node.location();
                         let path_str = loc.0;
@@ -1434,7 +1452,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                     if let Some(node) = finding
                         .node_indices
                         .iter()
-                        .filter_map(|&ni| graph.get_node(petgraph::graph::NodeIndex::new(ni)))
+                        .filter_map(|&ni| graph.get_node(NodeIndex::new(ni)))
                         .find(|n| n.name() == wrapper_name)
                     {
                         if let Some(src) = node.source_snippet() {
@@ -1450,7 +1468,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
 
                 let mut nodes_info = Vec::new();
                 for &ni in &finding.node_indices {
-                    let node_idx = petgraph::graph::NodeIndex::new(ni);
+                    let node_idx = NodeIndex::new(ni);
                     if let Some(node) = graph.get_node(node_idx) {
                         let loc = node.location();
                         let path_str = loc.0;
@@ -1605,7 +1623,7 @@ fn handle_get_source(state: &SharedState, args: &serde_json::Value) -> ToolResul
 
         // No node is named `name` — it may be a struct/enum field or variant.
         let q = name.to_lowercase();
-        let fmt_field = |f: &crate::types::node::FieldDecl| {
+        let fmt_field = |f: &FieldDecl| {
             let ty = f.type_annotation.as_deref().map(|t| format!(": {t}")).unwrap_or_default();
             let dv = f.default_value.as_deref().map(|v| format!(" = {v}")).unwrap_or_default();
             format!("field {}{ty}{dv}", f.name)
@@ -1645,7 +1663,7 @@ fn handle_get_source(state: &SharedState, args: &serde_json::Value) -> ToolResul
 }
 
 /// "field name: Type = default" describing a struct/class field.
-fn describe_field(f: &crate::types::node::FieldDecl) -> String {
+fn describe_field(f: &FieldDecl) -> String {
     let ty = f.type_annotation.as_deref().map(|t| format!(": {t}")).unwrap_or_default();
     let dv = f.default_value.as_deref().map(|v| format!(" = {v}")).unwrap_or_default();
     format!("field {}{ty}{dv}", f.name)
@@ -1662,7 +1680,6 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
         }
     };
     let kind_filter = args.get("kind").and_then(|v| v.as_str());
-    let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(1).clamp(1, 8) as usize;
     let repo = args.get("repository").and_then(|v| v.as_str());
 
     // Batch: a comma-separated `name` inspects several symbols in ONE call,
@@ -1684,7 +1701,7 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
 
     with_graph(state, repo, |graph| {
         let render_one = |name: &str| -> String {
-        let mut filtered: Vec<(petgraph::graph::NodeIndex, &GraphNode)> = graph
+        let mut filtered: Vec<(NodeIndex, &GraphNode)> = graph
             .search_by_name(name)
             .into_iter()
             .filter(|(_, node)| kind_filter.is_none_or(|k| node.label() == k))
@@ -1737,27 +1754,12 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
         text.push_str(&format_node(node));
         text.push('\n');
         if let Some(src) = node.source_snippet() {
+            // The body is already bounded by the annotate layer (MAX_SNIPPET_BYTES,
+            // 4 KB), so no further cap is needed — return it whole.
             text.push_str("```\n");
-            // Bound long bodies by default: the tail is rarely what a "what is X /
-            // who calls X" question needs, and a big body is re-sent every later
-            // turn. Small/medium functions (the common case) stay whole, so their
-            // accuracy is untouched; the full body is one depth=2 call away.
-            const BODY_LINE_CAP: usize = 35;
-            let total = src.lines().count();
-            if depth == 1 && total > BODY_LINE_CAP {
-                for line in src.lines().take(BODY_LINE_CAP) {
-                    text.push_str(line);
-                    text.push('\n');
-                }
-                text.push_str(&format!(
-                    "… (+{} more lines — pass depth=2 for the full body)\n",
-                    total - BODY_LINE_CAP
-                ));
-            } else {
-                text.push_str(src);
-                if !src.ends_with('\n') {
-                    text.push('\n');
-                }
+            text.push_str(src);
+            if !src.ends_with('\n') {
+                text.push('\n');
             }
             text.push_str("```\n");
         } else {
@@ -1815,54 +1817,17 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
             ));
         }
 
-        // ── Transitive call chain / blast radius (only when depth > 1) ──────
-        if depth > 1 {
-            let chain = graph.get_call_chain(*idx, depth);
-            text.push_str(&format!("── Call chain (callees, depth {depth}) ({}) ──\n", chain.len()));
-            if chain.is_empty() {
-                text.push_str("  (none)\n");
-            } else {
-                for (_, n, d) in chain.iter().take(40) {
-                    text.push_str(&format!("  {}→ {}\n", "  ".repeat(*d), format_node_brief(n)));
-                }
-                if chain.len() > 40 {
-                    text.push_str(&format!("  ... and {} more\n", chain.len() - 40));
-                }
-            }
-            text.push('\n');
-
-            let radius = graph.get_transitive_callers(*idx, depth);
-            text.push_str(&format!("── Blast radius (transitive callers, depth {depth}) ({}) ──\n", radius.len()));
-            if radius.is_empty() {
-                text.push_str("  (none)\n");
-            } else {
-                let list: Vec<_> = radius.iter().take(40).map(|(_, n, _)| format_node_brief(n)).collect();
-                text.push_str(&format!("  {}\n", list.join(", ")));
-                if radius.len() > 40 {
-                    text.push_str(&format!("  ... and {} more\n", radius.len() - 40));
-                }
-            }
-            text.push('\n');
-        }
-
         // ── Similar nodes ─────────────────────────────────────────────────
-        // Similar code is supplementary, not the core of "what is X", so keep it
-        // cheap by default (count + top 3) and only widen it on the depth>1
-        // deep-dive signal — this is the bulk of get_context's response bloat on
-        // symbols with many look-alikes.
+        // Supplementary, not the core of "what is X" — show the count + top 5.
         if graph.has_annotations() {
             let groups = graph.find_similar_nodes(Some(node.label()), 3);
             let my_group = groups.iter().find(|g| g.iter().any(|(i, _)| i == idx));
             if let Some(group) = my_group {
                 let others: Vec<_> = group.iter().filter(|(i, _)| i != idx).collect();
                 if !others.is_empty() {
-                    let show = if depth > 1 { 10 } else { 3 };
                     text.push_str(&format!("── Similar code ({} match(es)) ──\n", others.len()));
-                    let list: Vec<_> = others.iter().take(show).map(|(_, n)| format_node_brief(n)).collect();
+                    let list: Vec<_> = others.iter().take(5).map(|(_, n)| format_node_brief(n)).collect();
                     text.push_str(&format!("  {}\n", list.join(", ")));
-                    if others.len() > show {
-                        text.push_str("  (pass depth=2 for the full list)\n");
-                    }
                     text.push('\n');
                 }
             }
@@ -2023,10 +1988,10 @@ fn handle_get_module_overview(state: &SharedState, args: &serde_json::Value) -> 
     let repo = args.get("repository").and_then(|v| v.as_str());
 
     with_graph(state, repo, |graph| {
-        let needle = std::path::Path::new(dir_path);
+        let needle = Path::new(dir_path);
 
         // Collect all File nodes whose path contains the needle directory.
-        let mut files: Vec<(petgraph::graph::NodeIndex, &GraphNode)> = graph
+        let mut files: Vec<(NodeIndex, &GraphNode)> = graph
             .graph
             .node_indices()
             .filter_map(|idx| {
@@ -2058,7 +2023,7 @@ fn handle_get_module_overview(state: &SharedState, args: &serde_json::Value) -> 
         // Sort files by path for consistent output.
         files.sort_by_key(|(_, n)| n.name().to_string());
 
-        let file_paths: std::collections::HashSet<_> = files
+        let file_paths: HashSet<_> = files
             .iter()
             .filter_map(|(_, n)| {
                 if let GraphNode::File(f) = n {
@@ -2120,7 +2085,7 @@ fn handle_get_module_overview(state: &SharedState, args: &serde_json::Value) -> 
 
         // Cross-file call relationships within the module
         let mut internal_calls: Vec<(String, String)> = Vec::new();
-        let mut external_deps: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut external_deps: HashSet<String> = HashSet::new();
 
         for (file_idx, node) in &files {
             if let GraphNode::File(_) = node {
@@ -2179,7 +2144,7 @@ fn handle_get_module_overview(state: &SharedState, args: &serde_json::Value) -> 
 }
 
 /// Returns true if the cache is newer than all source files in `root` (i.e. nothing has changed).
-fn cache_is_fresh(root: &std::path::Path, cache_path: &std::path::Path) -> bool {
+fn cache_is_fresh(root: &Path, cache_path: &Path) -> bool {
     let cache_mtime = match std::fs::metadata(cache_path).and_then(|m| m.modified()) {
         Ok(t) => t,
         Err(_) => return false,
@@ -2188,8 +2153,8 @@ fn cache_is_fresh(root: &std::path::Path, cache_path: &std::path::Path) -> bool 
 }
 
 fn any_source_newer(
-    dir: &std::path::Path,
-    cache_path: &std::path::Path,
+    dir: &Path,
+    cache_path: &Path,
     cache_mtime: std::time::SystemTime,
 ) -> bool {
     let entries = match std::fs::read_dir(dir) {
@@ -2222,7 +2187,7 @@ fn any_source_newer(
 }
 
 /// Returns true if the path has a recognised source file extension.
-fn is_source_file(path: &std::path::Path) -> bool {
+fn is_source_file(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()).unwrap_or(""),
         "rs" | "py"
@@ -2247,7 +2212,7 @@ fn is_source_file(path: &std::path::Path) -> bool {
 
 /// Append `.ast_context_cache.json` to the project's `.gitignore` if it isn't already there.
 /// Best-effort — silently does nothing if the file can't be read or written.
-fn ensure_gitignore(root: &std::path::Path) {
+fn ensure_gitignore(root: &Path) {
     let gitignore = root.join(".gitignore");
     const ENTRY: &str = ".ast_context_cache.json";
 

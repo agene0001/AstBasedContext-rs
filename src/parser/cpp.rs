@@ -162,23 +162,11 @@ impl CppParser {
                     },
                     args: params,
                     arg_types,
-                    return_type: None,
-                    visibility: None,
-                    is_static: false,
-                    is_abstract: false,
                     cyclomatic_complexity: complexity,
-                    decorators: Vec::new(),
                     context: ctx.as_ref().map(|(n, _, _)| n.clone()),
                     context_type: ctx.as_ref().map(|(_, t, _)| t.clone()),
                     class_context: class_ctx.map(|(n, _, _)| n),
-                    language: Language::Cpp,
-                    is_dependency: false,
-                    source: None,
-                    docstring: None,
-                    is_async: false,
-                    todo_comments: vec![],
-                    raises: vec![],
-                    has_error_handling: false,
+                    ..FunctionData::template(Language::Cpp)
                 });
             }
         }

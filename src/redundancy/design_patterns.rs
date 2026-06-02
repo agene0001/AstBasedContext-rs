@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use super::context::AnalysisContext;
 use super::types::{Tier, FindingKind, Finding};
+use std::path::Path;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 11: Suggest facade — external modules calling many internals of one module
@@ -19,7 +20,7 @@ pub(super) fn suggest_facade(
     for &(idx, node) in &ctx.functions {
         if let GraphNode::Function(f) = node {
             // Use the parent directory as the "module"
-            if let Some(parent) = std::path::Path::new(&f.path).parent() {
+            if let Some(parent) = Path::new(&f.path).parent() {
                 let module = parent.to_string_lossy().to_string();
                 file_functions.entry(module).or_default().push(idx);
             }
@@ -39,7 +40,7 @@ pub(super) fn suggest_facade(
         for &func_idx in func_indices {
             for (caller_idx, caller_node) in ctx.get_callers_of(func_idx) {
                 if let GraphNode::Function(cf) = caller_node {
-                    let caller_module = std::path::Path::new(&cf.path)
+                    let caller_module = Path::new(&cf.path)
                         .parent()
                         .map(|p| p.to_string_lossy().to_string())
                         .unwrap_or_default();
@@ -57,7 +58,7 @@ pub(super) fn suggest_facade(
 
         // Need at least 4 internal ctx.functions called by at least 3 external callers
         if internal_called >= 4 && external_count >= 3 {
-            let module_name = std::path::Path::new(module)
+            let module_name = Path::new(module)
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| module.clone());
@@ -445,7 +446,7 @@ pub(super) fn suggest_observer(
             .iter()
             .filter_map(|(_, caller_node)| {
                 if let GraphNode::Function(cf) = caller_node {
-                    std::path::Path::new(&cf.path)
+                    Path::new(&cf.path)
                         .parent()
                         .map(|p| p.to_string_lossy().to_string())
                 } else {
@@ -454,7 +455,7 @@ pub(super) fn suggest_observer(
             })
             .collect();
 
-        let own_module = std::path::Path::new(&func.path)
+        let own_module = Path::new(&func.path)
             .parent()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
@@ -567,7 +568,7 @@ pub(super) fn suggest_mediator(
     let mut module_functions: HashMap<String, Vec<NodeIndex>> = HashMap::new();
     for &(idx, node) in &ctx.functions {
         if let GraphNode::Function(f) = node {
-            if let Some(parent) = std::path::Path::new(&f.path).parent() {
+            if let Some(parent) = Path::new(&f.path).parent() {
                 let module = parent.to_string_lossy().to_string();
                 module_functions.entry(module).or_default().push(idx);
             }
@@ -591,7 +592,7 @@ pub(super) fn suggest_mediator(
             for (caller_idx, caller_node) in ctx.get_callers_of(func_idx) {
                 if !func_set.contains(&caller_idx) {
                     if let GraphNode::Function(cf) = caller_node {
-                        if let Some(p) = std::path::Path::new(&cf.path).parent() {
+                        if let Some(p) = Path::new(&cf.path).parent() {
                             let m = p.to_string_lossy().to_string();
                             if &m != module {
                                 incoming_modules.insert(m);
@@ -605,7 +606,7 @@ pub(super) fn suggest_mediator(
             for (callee_idx, callee_node) in ctx.get_callees_of(func_idx) {
                 if !func_set.contains(&callee_idx) {
                     if let GraphNode::Function(cf) = callee_node {
-                        if let Some(p) = std::path::Path::new(&cf.path).parent() {
+                        if let Some(p) = Path::new(&cf.path).parent() {
                             let m = p.to_string_lossy().to_string();
                             if &m != module {
                                 outgoing_modules.insert(m);
@@ -621,7 +622,7 @@ pub(super) fn suggest_mediator(
 
         // High fan-in AND fan-out = coordination hub
         if fan_in >= 4 && fan_out >= 4 {
-            let module_name = std::path::Path::new(module)
+            let module_name = Path::new(module)
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| module.clone());

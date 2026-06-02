@@ -14,12 +14,14 @@ pub(super) fn detect_clone_in_loop(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
+    // Only "clone an EXISTING value" operations — these are the ones that may be
+    // hoistable when the cloned value is loop-invariant. `to_string()` / `format!()`
+    // / `String::from()` construct a NEW per-iteration value (one string per item),
+    // which is rarely hoistable; flagging them produced ~55% false positives in the
+    // precision audit, so they're excluded.
     let expensive_patterns = [
         (".clone()", "clone()"),
-        (".to_string()", "to_string()"),
         (".to_owned()", "to_owned()"),
-        ("format!(", "format!()"),
-        ("String::from(", "String::from()"),
         (".to_vec()", "to_vec()"),
     ];
 
@@ -70,7 +72,9 @@ pub(super) fn detect_clone_in_loop(
                 for &(pattern, label) in &expensive_patterns {
                     if trimmed.contains(pattern) {
                         findings.push(Finding {
-                            tier: Tier::Medium,
+                            // Heuristic hint (can't tell loop-invariant clones from
+                            // necessary per-iteration ones) — keep it low-signal.
+                            tier: Tier::Low,
                             kind: FindingKind::CloneInLoop {
                                 function_name: func.name.clone(),
                                 pattern: label.to_string(),
@@ -489,7 +493,7 @@ pub(super) fn detect_list_concat_in_loop(
         };
 
         // Only relevant for Python/JS (no Rust equivalent since + on Vec doesn't compile)
-        if !matches!(func.language, crate::types::Language::Python | crate::types::Language::JavaScript | crate::types::Language::TypeScript) {
+        if !matches!(func.language, Language::Python | Language::JavaScript | Language::TypeScript) {
             continue;
         }
 
@@ -1658,14 +1662,18 @@ pub(super) fn detect_sleep_in_loop(
                             continue;
                         }
                         findings.push(Finding {
-                            tier: Tier::Medium,
+                            // Heuristic hint: a blocking sleep in a loop *may* be a
+                            // busy-wait, but it's just as often intentional pacing,
+                            // rate-limiting, or debounce — which a textual check
+                            // can't tell apart. Low-confidence, softened wording.
+                            tier: Tier::Low,
                             kind: FindingKind::SleepInLoop {
                                 function_name: func.name.clone(),
                                 pattern: label.to_string(),
                             },
                             node_indices: vec![idx.index()],
                             description: format!(
-                                "`{}`: `{}` inside loop — busy-wait/polling pattern. Consider event-driven or callback approach.",
+                                "`{}`: blocking `{}` inside a loop — if this is polling for a condition, prefer an event-driven approach (ignore if it's intentional pacing/debounce).",
                                 func.name, label,
                             ),
                         });

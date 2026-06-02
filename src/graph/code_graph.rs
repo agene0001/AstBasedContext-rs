@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::node::GraphNode;
 use crate::types::EdgeKind;
+use crate::error::Error;
+use std::path::Path;
 
 /// An in-memory directed code graph backed by petgraph.
 #[derive(Debug, Serialize, Deserialize)]
@@ -186,7 +188,7 @@ impl CodeGraph {
     pub const FORMAT_VERSION: u32 = 3;
 
     /// Save the graph to a JSON file with a version envelope and config fingerprint.
-    pub fn save(&self, path: &std::path::Path) -> crate::error::Result<()> {
+    pub fn save(&self, path: &Path) -> crate::error::Result<()> {
         self.save_with_config(path, false, &[])
     }
 
@@ -194,11 +196,11 @@ impl CodeGraph {
     /// The config fingerprint is used on load to detect stale caches.
     pub fn save_with_config(
         &self,
-        path: &std::path::Path,
+        path: &Path,
         annotate: bool,
         exclude: &[String],
     ) -> crate::error::Result<()> {
-        let file = std::fs::File::create(path).map_err(|e| crate::error::Error::Io {
+        let file = std::fs::File::create(path).map_err(|e| Error::Io {
             path: path.to_path_buf(),
             source: e,
         })?;
@@ -213,12 +215,12 @@ impl CodeGraph {
             "graph": self,
         });
         serde_json::to_writer(std::io::BufWriter::new(file), &envelope)
-            .map_err(|e| crate::error::Error::Graph(format!("JSON write error: {e}")))?;
+            .map_err(|e| Error::Graph(format!("JSON write error: {e}")))?;
         Ok(())
     }
 
     /// Load a graph from a JSON file, checking the version envelope.
-    pub fn load(path: &std::path::Path) -> crate::error::Result<Self> {
+    pub fn load(path: &Path) -> crate::error::Result<Self> {
         Self::load_with_config(path, None, None)
     }
 
@@ -227,23 +229,23 @@ impl CodeGraph {
     /// If `expected_annotate` or `expected_exclude` are `Some`, the cache is
     /// rejected (returns `Err`) if the stored config does not match.
     pub fn load_with_config(
-        path: &std::path::Path,
+        path: &Path,
         expected_annotate: Option<bool>,
         expected_exclude: Option<&[String]>,
     ) -> crate::error::Result<Self> {
-        let file = std::fs::File::open(path).map_err(|e| crate::error::Error::Io {
+        let file = std::fs::File::open(path).map_err(|e| Error::Io {
             path: path.to_path_buf(),
             source: e,
         })?;
         let raw: serde_json::Value =
             serde_json::from_reader(std::io::BufReader::new(file))
-                .map_err(|e| crate::error::Error::Graph(format!("JSON read error: {e}")))?;
+                .map_err(|e| Error::Graph(format!("JSON read error: {e}")))?;
 
         // Check version field — graphs saved before versioning had no "version" key,
         // so treat missing version as 0 (incompatible).
         let file_version = raw.get("version").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
         if file_version != Self::FORMAT_VERSION {
-            return Err(crate::error::Error::Graph(format!(
+            return Err(Error::Graph(format!(
                 "Graph file version mismatch: file is v{file_version}, tool expects v{}. \
                  Re-index your project to regenerate the graph.",
                 Self::FORMAT_VERSION
@@ -255,7 +257,7 @@ impl CodeGraph {
             if let Some(want_annotate) = expected_annotate {
                 let cached_annotate = cfg.get("annotate").and_then(|v| v.as_bool()).unwrap_or(false);
                 if cached_annotate != want_annotate {
-                    return Err(crate::error::Error::Graph(format!(
+                    return Err(Error::Graph(format!(
                         "Cache config mismatch: cache has annotate={cached_annotate}, \
                          requested annotate={want_annotate}. Re-indexing."
                     )));
@@ -270,24 +272,24 @@ impl CodeGraph {
                 let mut want_sorted = want_exclude.to_vec();
                 want_sorted.sort();
                 if cached_exclude != want_sorted {
-                    return Err(crate::error::Error::Graph(
+                    return Err(Error::Graph(
                         "Cache config mismatch: exclude patterns changed. Re-indexing.".into(),
                     ));
                 }
             }
         } else if expected_annotate == Some(true) {
             // Old cache with no config field, but caller wants annotations.
-            return Err(crate::error::Error::Graph(
+            return Err(Error::Graph(
                 "Cache has no config fingerprint and annotate=true was requested. Re-indexing.".into(),
             ));
         }
 
         let graph_value = raw.get("graph").ok_or_else(|| {
-            crate::error::Error::Graph("Graph file is missing 'graph' field".into())
+            Error::Graph("Graph file is missing 'graph' field".into())
         })?;
 
         let mut graph: CodeGraph = serde_json::from_value(graph_value.clone())
-            .map_err(|e| crate::error::Error::Graph(format!("JSON decode error: {e}")))?;
+            .map_err(|e| Error::Graph(format!("JSON decode error: {e}")))?;
         graph.rebuild_indexes();
         Ok(graph)
     }
