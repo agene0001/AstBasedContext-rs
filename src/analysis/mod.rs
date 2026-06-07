@@ -655,6 +655,11 @@ pub fn analyze_with(
         optimization::detect_clone_in_loop(&ctx, &mut findings);
     }
 
+    // ── Check: Clone of a Copy type (Low, semantic-only) ──────────────
+    if cat_ok("optimization") && !skip("optimization") && !skip("detect_clone_of_copy") {
+        optimization::detect_clone_of_copy(&ctx, &mut findings);
+    }
+
     // ── Check 104: Redundant collect then iterate (Medium) ────────────
     if cat_ok("optimization") && !skip("optimization") && !skip("detect_redundant_collect_iterate") {
         optimization::detect_redundant_collect_iterate(&ctx, &mut findings);

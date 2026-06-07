@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use super::{Location, Mutability, SemanticProvider};
+use super::{Location, Mutability, SemanticProvider, TypeInfo};
 
 /// How long to wait for the server to finish its initial indexing before giving
 /// up and proceeding best-effort.
@@ -263,6 +263,30 @@ impl LspClient {
     /// `&self` / `self` / `mut self` receiver ⇒ `Shared`; no resolvable
     /// signature ⇒ `None`.
     fn receiver_mutability(&mut self, loc: &Location) -> io::Result<Option<Mutability>> {
+        let text = self.hover_markdown(loc)?;
+        // `&mut self` is checked first: a signature like `fn f(&self, x: &mut T)`
+        // contains `&mut` but not the substring `&mut self`, so it reads Shared.
+        Ok(if text.contains("&mut self") {
+            Some(Mutability::Mutable)
+        } else if text.contains("self") {
+            Some(Mutability::Shared)
+        } else {
+            None
+        })
+    }
+
+    /// Resolved type of the expression at `loc`, parsed from the type
+    /// rust-analyzer shows on hover (e.g. ```` ```rust\nlet x: i32\n``` ````).
+    fn type_of(&mut self, loc: &Location) -> io::Result<Option<TypeInfo>> {
+        let text = self.hover_markdown(loc)?;
+        if std::env::var_os("AST_CONTEXT_LSP_DEBUG").is_some() {
+            eprintln!("lsp hover raw: {text:?}");
+        }
+        Ok(parse_hover_type(&text).map(|name| TypeInfo { name, is_copy: None, size: None }))
+    }
+
+    /// Raw markdown of `textDocument/hover` at `loc`.
+    fn hover_markdown(&mut self, loc: &Location) -> io::Result<String> {
         let path = PathBuf::from(&loc.file);
         let uri = path_to_uri(&path);
         self.ensure_open(&path, &uri)?;
@@ -274,20 +298,11 @@ impl LspClient {
                 "position": { "line": loc.line.saturating_sub(1), "character": loc.col }
             }),
         )?;
-
-        let text = result
+        Ok(result
             .pointer("/contents/value")
             .and_then(Value::as_str)
-            .unwrap_or("");
-        // `&mut self` is checked first: a signature like `fn f(&self, x: &mut T)`
-        // contains `&mut` but not the substring `&mut self`, so it reads Shared.
-        Ok(if text.contains("&mut self") {
-            Some(Mutability::Mutable)
-        } else if text.contains("self") {
-            Some(Mutability::Shared)
-        } else {
-            None
-        })
+            .unwrap_or("")
+            .to_string())
     }
 
     fn shutdown(&mut self) {
@@ -369,6 +384,69 @@ impl SemanticProvider for LspProvider {
             }
         }
     }
+
+    fn type_of(&self, loc: &Location) -> Option<TypeInfo> {
+        let mut client = self.client.lock().ok()?;
+        match client.type_of(loc) {
+            Ok(t) => t,
+            Err(e) => {
+                if std::env::var_os("AST_CONTEXT_LSP_DEBUG").is_some() {
+                    eprintln!("lsp type_of failed: {e}");
+                }
+                None
+            }
+        }
+    }
+
+    /// Stock LSP has no "does `T: Copy`?" query, so this answers only for the
+    /// known-`Copy` primitive *value* types — `Some(true)` for those, `None`
+    /// (unknown) otherwise. Deliberately conservative: a user `#[derive(Copy)]`
+    /// type reads as unknown rather than a guess, and references are excluded so
+    /// the consumer never mistakes a deref-clone for a redundant one.
+    fn is_copy(&self, ty: &TypeInfo) -> Option<bool> {
+        if COPY_PRIMITIVES.contains(&ty.name.trim()) {
+            Some(true)
+        } else {
+            None
+        }
+    }
+}
+
+/// `Copy` primitive value types. References are intentionally absent:
+/// `(&x).clone()` auto-derefs and clones the pointee, so it isn't redundant.
+const COPY_PRIMITIVES: &[&str] = &[
+    "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32",
+    "f64", "bool", "char", "()",
+];
+
+/// Extract the type from rust-analyzer hover text. Works for both the fenced
+/// markdown form (```` ```rust\nlet x: i32\n``` ````) and the plaintext form
+/// rust-analyzer emits by default, which looks like:
+///
+/// ```text
+/// crate::path::SourceSpan
+///
+/// pub start_line: u32
+///
+/// size = 4, align = 0x4, …
+/// ```
+///
+/// The binding is the first non-comment line carrying a `name: Type`
+/// annotation; we skip the leading path line (`::`, no `: `) and trailing
+/// `size = …` notes, then take the text after the binding colon.
+fn parse_hover_type(md: &str) -> Option<String> {
+    let line = md
+        .lines()
+        .map(|l| l.trim().trim_start_matches("```rust").trim_start_matches("```").trim())
+        .find(|l| !l.is_empty() && !l.starts_with("//") && l.contains(": "))?;
+    let after = &line[line.find(": ")? + 2..];
+    let ty = after
+        .split(" = ")
+        .next()
+        .unwrap_or(after)
+        .trim()
+        .trim_end_matches([';', ',']);
+    (!ty.is_empty()).then(|| ty.to_string())
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -481,5 +559,59 @@ mod tests {
             Some(Mutability::Shared),
             "slice::contains takes &self"
         );
+    }
+
+    #[test]
+    fn parse_hover_type_handles_plain_and_fenced() {
+        // rust-analyzer's default plaintext hover (path line + binding + size note).
+        assert_eq!(
+            parse_hover_type("crate::types::node::SourceSpan\n\npub start_line: u32\n\nsize = 4, align = 0x4"),
+            Some("u32".to_string())
+        );
+        // Fenced markdown form.
+        assert_eq!(parse_hover_type("```rust\nlet x: i32\n```"), Some("i32".to_string()));
+        // Generics keep their inner commas/colons-free content.
+        assert_eq!(
+            parse_hover_type("let m: HashMap<String, Vec<u8>>"),
+            Some("HashMap<String, Vec<u8>>".to_string())
+        );
+        // A shared reference type is preserved (the caller decides it isn't Copy).
+        assert_eq!(parse_hover_type("let r: &String"), Some("&String".to_string()));
+        // `= value` suffix and trailing punctuation are trimmed.
+        assert_eq!(parse_hover_type("let x: i32 = 5"), Some("i32".to_string()));
+        // A bare path with no binding annotation yields nothing.
+        assert_eq!(parse_hover_type("crate::types::node::SourceSpan"), None);
+    }
+
+    // Resolves the type of a `u32` field (Copy) and a `String` field (not), and
+    // checks is_copy. Run with:
+    //   cargo test --features lsp -- --ignored type_of_live
+    #[test]
+    #[ignore]
+    fn type_of_live() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let program = std::env::var("AST_CONTEXT_LSP_RA").unwrap_or_else(|_| "rust-analyzer".into());
+        let provider = LspProvider::start_with(&program, &root).expect("rust-analyzer should start");
+
+        let file = root.join("src/types/node.rs");
+        let text = std::fs::read_to_string(&file).unwrap();
+        let at = |needle: &str| -> Location {
+            let (line0, col) = text
+                .lines()
+                .enumerate()
+                .find_map(|(i, l)| l.find(needle).map(|c| (i, c)))
+                .unwrap_or_else(|| panic!("{needle} present"));
+            Location { file: file.to_string_lossy().into_owned(), line: line0 + 1, col }
+        };
+
+        let u32_ty = provider.type_of(&at("start_line: u32")).expect("u32 field type resolved");
+        eprintln!("type_of(start_line) = {u32_ty:?}");
+        assert_eq!(u32_ty.name, "u32");
+        assert_eq!(provider.is_copy(&u32_ty), Some(true));
+
+        let str_ty = provider.type_of(&at("name: String")).expect("String field type resolved");
+        eprintln!("type_of(name) = {str_ty:?}");
+        assert_eq!(str_ty.name, "String");
+        assert_eq!(provider.is_copy(&str_ty), None, "String is not a known Copy primitive");
     }
 }

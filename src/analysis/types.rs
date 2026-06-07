@@ -730,6 +730,14 @@ pub enum FindingKind {
         pattern: String,
     },
 
+    /// `.clone()` on a value of a `Copy` type — the clone is redundant; the value
+    /// is copied implicitly. Confirmed via a language server's resolved type.
+    CloneOfCopy {
+        function_name: String,
+        var: String,
+        type_name: String,
+    },
+
     /// `.collect()` immediately followed by `.iter()` / `.into_iter()` — skip the allocation.
     RedundantCollectIterate {
         function_name: String,
@@ -1109,6 +1117,7 @@ impl FindingKind {
             | FindingKind::TechDebtComment { .. } => "code_quality",
 
             FindingKind::CloneInLoop { .. }
+            | FindingKind::CloneOfCopy { .. }
             | FindingKind::RedundantCollectIterate { .. }
             | FindingKind::RepeatedMapLookup { .. }
             | FindingKind::VecNoPresize { .. }
@@ -1254,6 +1263,7 @@ impl FindingKind {
             FindingKind::InconsistentErrorHandling { .. } => "IEH=inconsistent-error",
             FindingKind::TechDebtComment { .. } => "TD=tech-debt",
             FindingKind::CloneInLoop { .. } => "CIL=clone-in-loop",
+            FindingKind::CloneOfCopy { .. } => "COC=clone-of-copy",
             FindingKind::RedundantCollectIterate { .. } => "RCI=redundant-collect",
             FindingKind::RepeatedMapLookup { .. } => "RML=repeated-lookup",
             FindingKind::VecNoPresize { .. } => "VNP=vec-no-presize",

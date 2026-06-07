@@ -46,8 +46,9 @@ pub(super) fn detect_clone_in_loop(
         // and clone once. This replaces the guess for languages we can analyze.
         if let Some(ud) = dataflow::UseDef::analyze(src, func.language) {
             let mut seen = std::collections::HashSet::new();
-            for (var, pos) in &ud.clones {
-                if !ud.is_invariant_clone(var, *pos) || !seen.insert(var.as_str()) {
+            for site in &ud.clones {
+                let (var, pos) = (&site.recv, site.byte_offset);
+                if !ud.is_invariant_clone(var, pos) || !seen.insert(var.as_str()) {
                     continue;
                 }
 
@@ -59,7 +60,7 @@ pub(super) fn detect_clone_in_loop(
                 // the cloned var inside the loop; if any actually takes `&mut
                 // self`, the value changes per iteration, so skip the finding.
                 if ctx.semantic.is_available() && func.language == Language::Rust {
-                    let mutated = ud.unconfirmed_methods(var, *pos).iter().any(|(_m, row, col)| {
+                    let mutated = ud.unconfirmed_methods(var, pos).iter().any(|(_m, row, col)| {
                         let loc = Location {
                             file: func.path.to_string_lossy().into_owned(),
                             line: func.span.start_line as usize + row,
@@ -152,6 +153,58 @@ pub(super) fn detect_clone_in_loop(
                 if loop_depth == 0 {
                     in_loop = false;
                 }
+            }
+        }
+    }
+}
+
+/// `.clone()` on a value whose type is `Copy` is redundant — the value is copied
+/// implicitly, so the `.clone()` can be dropped. Purely a good-faith check: it
+/// only runs when a language server can resolve the receiver's type and confirm
+/// it is a known `Copy` type, so there is no heuristic/AST fallback (a syntactic
+/// pass can't know a type is `Copy`).
+pub(super) fn detect_clone_of_copy(ctx: &AnalysisContext, findings: &mut Vec<Finding>) {
+    if !ctx.semantic.is_available() {
+        return;
+    }
+    for &(idx, node) in &ctx.functions {
+        let func = match node {
+            GraphNode::Function(f) => f,
+            _ => continue,
+        };
+        if func.language != Language::Rust {
+            continue;
+        }
+        let Some(src) = &func.source else { continue };
+        let Some(ud) = dataflow::UseDef::analyze(src, func.language) else {
+            continue;
+        };
+
+        let mut seen = std::collections::HashSet::new();
+        for site in &ud.clones {
+            if !seen.insert(site.recv.as_str()) {
+                continue;
+            }
+            let loc = Location {
+                file: func.path.to_string_lossy().into_owned(),
+                line: func.span.start_line as usize + site.recv_row,
+                col: site.recv_col,
+            };
+            let Some(ty) = ctx.semantic.type_of(&loc) else { continue };
+            if ctx.semantic.is_copy(&ty) == Some(true) {
+                findings.push(Finding {
+                    tier: Tier::Low, // certain, but a tiny win
+                    kind: FindingKind::CloneOfCopy {
+                        function_name: func.name.clone(),
+                        var: site.recv.clone(),
+                        type_name: ty.name.clone(),
+                    },
+                    node_indices: vec![idx.index()],
+                    description: format!(
+                        "`{}`: `{}.clone()` clones a `Copy` type `{}` — drop the `.clone()`.",
+                        func.name, site.recv, ty.name,
+                    ),
+                });
             }
         }
     }

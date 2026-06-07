@@ -30,6 +30,16 @@ const MUTATING_METHODS: &[&str] = &[
     "get_mut", "as_mut", "entry",
 ];
 
+/// A `<ident>.clone()` call site, with the receiver's snippet position so a
+/// caller with a language server can resolve its type.
+#[derive(Debug)]
+pub(super) struct CloneSite {
+    pub(super) recv: String,
+    pub(super) byte_offset: usize,
+    pub(super) recv_row: usize,
+    pub(super) recv_col: usize,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct UseDef {
     /// Byte spans of loop expressions (their whole extent, body included).
@@ -38,8 +48,8 @@ pub(super) struct UseDef {
     decls: HashMap<String, Vec<usize>>,
     /// Variable name → byte offsets where it is mutated (assign / `&mut` / mut method).
     mutated: HashMap<String, Vec<usize>>,
-    /// `(receiver_ident, byte_offset)` for each `<ident>.clone()` call.
-    pub(super) clones: Vec<(String, usize)>,
+    /// Each `<ident>.clone()` call site.
+    pub(super) clones: Vec<CloneSite>,
     /// Receiver-method calls whose effect on the receiver is *unknown* without
     /// type info — i.e. neither a known mutator (`MUTATING_METHODS`) nor a
     /// read-only clone. Stored as `(receiver, method, byte_offset, row, col)`
@@ -162,7 +172,13 @@ fn walk(node: Node, src: &[u8], ud: &mut UseDef) {
                         if recv.kind() == "identifier" {
                             if let Some(rname) = ident_text(recv, src) {
                                 if method == "clone" {
-                                    ud.clones.push((rname.to_string(), node.start_byte()));
+                                    let rp = recv.start_position();
+                                    ud.clones.push(CloneSite {
+                                        recv: rname.to_string(),
+                                        byte_offset: node.start_byte(),
+                                        recv_row: rp.row,
+                                        recv_col: rp.column,
+                                    });
                                 } else if MUTATING_METHODS.contains(&method) {
                                     ud.mutated.entry(rname.to_string()).or_default().push(node.start_byte());
                                 } else {
@@ -200,8 +216,8 @@ mod tests {
         let ud = UseDef::analyze(src, Language::Rust).unwrap();
         ud.clones
             .iter()
-            .filter(|(v, p)| ud.is_invariant_clone(v, *p))
-            .map(|(v, _)| v.clone())
+            .filter(|s| ud.is_invariant_clone(&s.recv, s.byte_offset))
+            .map(|s| s.recv.clone())
             .collect()
     }
 
