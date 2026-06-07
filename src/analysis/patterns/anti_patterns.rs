@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use super::super::context::AnalysisContext;
 use super::super::helpers::p_min_len;
+use super::super::semantic::Location;
 use super::super::types::{Tier, FindingKind, Finding};
 use petgraph::Direction;
 use std::path::Path;
@@ -421,26 +422,85 @@ pub(crate) fn detect_dead_code(
             }
         }
 
-        if ctx.caller_indices(idx).is_empty()
-            && !referenced_in
-                .get(func.name.as_str())
-                .is_some_and(|v| v.iter().any(|&i| i != idx))
-        {
-            findings.push(Finding {
-                tier: Tier::Critical,
-                kind: FindingKind::DeadCode {
-                    name: func.name.clone(),
-                    file_path: func.path.display().to_string(),
-                },
-                node_indices: vec![idx.index()],
-                description: format!(
-                    "`{}` in {} is never called — dead code.",
-                    func.name,
-                    func.path.file_name().unwrap_or_default().to_string_lossy()
-                ),
-            });
+        if ctx.caller_indices(idx).is_empty() {
+            // Prefer ground truth. When a language server is available and this
+            // is a Rust file, ask it for real references — that resolves calls
+            // through macros, function pointers and trait dispatch, exactly the
+            // cases the CALLS graph (and the textual guard) get wrong. Fall back
+            // to the heuristic only when it can't answer.
+            let semantic_verdict = if ctx.semantic.is_available() && path_lower.ends_with(".rs") {
+                rust_fn_name_location(func).and_then(|loc| {
+                    ctx.semantic.references(&loc).map(|refs| {
+                        let external = refs.iter().filter(|r| !within_fn(r, func)).count();
+                        if std::env::var_os("AST_CONTEXT_LSP_DEBUG").is_some() {
+                            eprintln!(
+                                "dead-code semantic: {} -> {} refs ({} external)",
+                                func.name,
+                                refs.len(),
+                                external
+                            );
+                        }
+                        external > 0
+                    })
+                })
+            } else {
+                None
+            };
+
+            let is_dead = match semantic_verdict {
+                // The server spoke: trust it (no external use ⇒ dead).
+                Some(used_externally) => !used_externally,
+                // No server answer: textual reference-guard, as before.
+                None => !referenced_in
+                    .get(func.name.as_str())
+                    .is_some_and(|v| v.iter().any(|&i| i != idx)),
+            };
+
+            if is_dead {
+                let confirmed = semantic_verdict.is_some();
+                findings.push(Finding {
+                    tier: Tier::Critical,
+                    kind: FindingKind::DeadCode {
+                        name: func.name.clone(),
+                        file_path: func.path.display().to_string(),
+                    },
+                    node_indices: vec![idx.index()],
+                    description: format!(
+                        "`{}` in {} is never called — dead code{}.",
+                        func.name,
+                        func.path.file_name().unwrap_or_default().to_string_lossy(),
+                        if confirmed { " (confirmed: zero references)" } else { "" }
+                    ),
+                });
+            }
         }
     }
+}
+
+/// Source position of a Rust free function's *name* identifier — where a
+/// language server expects the cursor for a references query. The span starts at
+/// the declaration keyword (`pub`/`fn`), so locate the name after `fn ` on the
+/// declaration line.
+fn rust_fn_name_location(func: &crate::types::node::FunctionData) -> Option<Location> {
+    let content = std::fs::read_to_string(&func.path).ok()?;
+    let line = content.lines().nth(func.span.start_line.saturating_sub(1) as usize)?;
+    let after_fn = line.find("fn ")? + 3;
+    let col = line[after_fn..].find(&func.name)? + after_fn;
+    Some(Location {
+        file: func.path.to_string_lossy().into_owned(),
+        line: func.span.start_line as usize,
+        col,
+    })
+}
+
+/// Whether a reference falls inside the function's own body span (a self-
+/// reference such as recursion) rather than counting as an external use.
+fn within_fn(r: &Location, func: &crate::types::node::FunctionData) -> bool {
+    let same_file = std::fs::canonicalize(&func.path)
+        .map(|p| Path::new(&r.file) == p)
+        .unwrap_or(false);
+    same_file
+        && (func.span.start_line as usize..=func.span.end_line as usize).contains(&r.line)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

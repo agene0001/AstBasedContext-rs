@@ -21,6 +21,15 @@ exclude = [
     ".github/",
 ]
 
+[features]
+# `lsp` enables the opt-in semantic-resolution path: a hand-rolled LSP client
+# (no new deps) that spawns a language server such as rust-analyzer to answer
+# type/reference queries with certainty. On by default so `--semantic` works out
+# of the box; build with `--no-default-features` for the pure-AST, no-subprocess
+# binary. The server is only *spawned* when the user passes `--semantic`.
+default = ["lsp"]
+lsp = []
+
 [[bin]]
 name = "ast_context"
 path = "src/main.rs"

@@ -193,6 +193,14 @@ enum Commands {
         /// Maximum number of findings to return per redundancy type (0 = all)
         #[arg(long, default_value = "10")]
         limit_per_type: usize,
+
+        /// Confirm findings with a language server (rust-analyzer) instead of
+        /// syntactic heuristics. Resolves real references/types, so e.g. dead
+        /// code is verified against true usage. Slower: the server loads and
+        /// indexes the project (which must build) — seconds, not milliseconds.
+        /// Rooted at the current directory; requires rust-analyzer on PATH.
+        #[arg(long)]
+        semantic: bool,
     },
 
     /// Watch a directory for changes and rebuild the graph
@@ -580,6 +588,7 @@ fn main() {
             category,
             include_source,
             limit_per_type,
+            semantic,
         } => {
             let g = load_graph(&graph);
 
@@ -607,7 +616,7 @@ fn main() {
                 ..Default::default()
             };
 
-            let findings = analysis::analyze(&g, &config);
+            let findings = run_redundancy(&g, &config, semantic);
             let mut filtered: Vec<_> = findings
                 .into_iter()
                 .filter(|f| f.tier <= min_tier)
@@ -797,6 +806,47 @@ fn load_graph(path: &Path) -> CodeGraph {
             process::exit(1);
         }
     }
+}
+
+/// Run the analysis, optionally backed by a language server. When `semantic` is
+/// set and the `lsp` feature is built in, this starts rust-analyzer for the
+/// current directory and routes findings through it; on any failure it warns and
+/// degrades to the pure-AST path so the command always produces output.
+#[cfg(feature = "lsp")]
+fn run_redundancy(
+    g: &CodeGraph,
+    config: &analysis::AnalysisConfig,
+    semantic: bool,
+) -> Vec<analysis::Finding> {
+    if !semantic {
+        return analysis::analyze(g, config);
+    }
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    match analysis::LspProvider::start(&root) {
+        Some(provider) => {
+            eprintln!("semantic mode: rust-analyzer ready ({})", root.display());
+            analysis::analyze_with(g, config, &provider)
+        }
+        None => {
+            eprintln!(
+                "semantic mode requested but rust-analyzer could not start \
+                 (is it on PATH? does the project build?); falling back to AST-only"
+            );
+            analysis::analyze(g, config)
+        }
+    }
+}
+
+#[cfg(not(feature = "lsp"))]
+fn run_redundancy(
+    g: &CodeGraph,
+    config: &analysis::AnalysisConfig,
+    semantic: bool,
+) -> Vec<analysis::Finding> {
+    if semantic {
+        eprintln!("--semantic ignored: this binary was built without the `lsp` feature");
+    }
+    analysis::analyze(g, config)
 }
 
 fn ctrlc_channel(tx: &std::sync::mpsc::Sender<()>) {

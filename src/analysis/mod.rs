@@ -9,6 +9,7 @@
 
 mod context;
 mod helpers;
+mod semantic;
 mod types;
 
 // Flat (cross-cutting) categories that don't group under a single theme.
@@ -34,6 +35,9 @@ use optimization::data_structures;
 use patterns::{anti_patterns, design_patterns, pattern_detection};
 use redundancy::{function_checks, struct_enum, type_suggestions};
 
+pub use semantic::{CallEdges, Location, Mutability, NullProvider, SemanticProvider, TypeInfo};
+#[cfg(feature = "lsp")]
+pub use semantic::LspProvider;
 pub use types::{AnalysisConfig, Finding, FindingKind, Tier};
 
 use crate::graph::CodeGraph;
@@ -41,10 +45,28 @@ use context::AnalysisContext;
 
 /// Run the full tiered redundancy analysis on a code graph.
 ///
+/// Uses syntactic heuristics only (a [`NullProvider`]). For the deeper,
+/// semantics-backed path — where a language server resolves types, references
+/// and receiver mutability — call [`analyze_with`] instead.
+///
 /// Returns findings sorted by tier (Critical first, Low last).
 pub fn analyze(graph: &CodeGraph, config: &AnalysisConfig) -> Vec<Finding> {
+    analyze_with(graph, config, &NullProvider)
+}
+
+/// Like [`analyze`], but backed by a caller-supplied [`SemanticProvider`].
+///
+/// Checks that can use semantic facts (resolved types, true references,
+/// receiver mutability) consult `semantic` and emit higher-confidence findings
+/// when it answers; otherwise they fall back to the same heuristics [`analyze`]
+/// uses. Passing [`NullProvider`] is exactly equivalent to calling [`analyze`].
+pub fn analyze_with(
+    graph: &CodeGraph,
+    config: &AnalysisConfig,
+    semantic: &dyn SemanticProvider,
+) -> Vec<Finding> {
     let mut findings = Vec::new();
-    let ctx = AnalysisContext::build(graph, config);
+    let ctx = AnalysisContext::build(graph, config, semantic);
 
     let skip = |name: &str| config.skip_checks.iter().any(|c| c == name);
 

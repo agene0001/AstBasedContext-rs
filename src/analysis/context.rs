@@ -6,12 +6,18 @@ use crate::graph::structural;
 use crate::graph::CodeGraph;
 use crate::types::node::GraphNode;
 use crate::types::EdgeKind;
+use super::semantic::SemanticProvider;
 use super::types::AnalysisConfig;
 
 #[allow(dead_code)]
 pub(crate) struct AnalysisContext<'a> {
     pub graph: &'a CodeGraph,
     pub config: &'a AnalysisConfig,
+
+    /// Semantic resolver (types, references, receiver mutability). A
+    /// [`NullProvider`](super::semantic::NullProvider) on the default path;
+    /// checks consult it and fall back to heuristics when it answers `None`.
+    pub semantic: &'a dyn SemanticProvider,
 
     // ── Node collections by type ───────────────────────────────────────
     pub functions: Vec<(NodeIndex, &'a GraphNode)>,
@@ -50,7 +56,11 @@ pub(crate) struct AnalysisContext<'a> {
 #[allow(dead_code)]
 impl<'a> AnalysisContext<'a> {
     /// Build the precomputed context from a code graph. Single pass through nodes + edges.
-    pub(super) fn build(graph: &'a CodeGraph, config: &'a AnalysisConfig) -> Self {
+    pub(super) fn build(
+        graph: &'a CodeGraph,
+        config: &'a AnalysisConfig,
+        semantic: &'a dyn SemanticProvider,
+    ) -> Self {
         use petgraph::visit::EdgeRef;
 
         let mut functions = Vec::new();
@@ -129,6 +139,7 @@ impl<'a> AnalysisContext<'a> {
         Self {
             graph,
             config,
+            semantic,
             functions,
             classes,
             files,
