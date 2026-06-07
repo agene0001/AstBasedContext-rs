@@ -20,12 +20,21 @@ use crate::types::node::FieldDecl;
 pub struct ServerState {
     /// Indexed graphs keyed by root path.
     pub graphs: HashMap<PathBuf, CodeGraph>,
+
+    /// Warm language servers keyed by root path, started lazily on the first
+    /// `semantic=true` request and kept alive for the rest of the session so we
+    /// never pay rust-analyzer's indexing cost more than once per repo. `None`
+    /// caches a failed start so we don't retry the multi-second spawn each call.
+    #[cfg(feature = "lsp")]
+    providers: HashMap<PathBuf, Option<Arc<crate::analysis::LspProvider>>>,
 }
 
 impl ServerState {
     pub fn new() -> Self {
         Self {
             graphs: HashMap::new(),
+            #[cfg(feature = "lsp")]
+            providers: HashMap::new(),
         }
     }
 }
@@ -190,6 +199,10 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                     "repository": {
                         "type": "string",
                         "description": "Indexed repo to query (optional)"
+                    },
+                    "semantic": {
+                        "type": "boolean",
+                        "description": "Confirm findings with a language server (rust-analyzer) instead of syntactic heuristics — e.g. dead code is verified against real references (resolving macros, fn-pointers, trait dispatch). SLOWER: the server loads/indexes the project (which must build) on first use this session, then stays warm. Rust only; requires rust-analyzer on PATH. Default false."
                     }
                 }
             }),
@@ -465,6 +478,58 @@ where
     F: FnOnce(&CodeGraph) -> ToolResult,
 {
     with_graph(state, None, f)
+}
+
+/// Resolve a `repository` argument to the root key under which a graph is
+/// indexed, mirroring [`with_graph`]'s exact-then-suffix matching. Used to key
+/// the language-server cache by the same root the graph lives under.
+fn resolve_root_key(s: &ServerState, repository: Option<&str>) -> Option<PathBuf> {
+    if s.graphs.is_empty() {
+        return None;
+    }
+    match repository {
+        Some(repo) => {
+            let target = PathBuf::from(repo);
+            if s.graphs.contains_key(&target) {
+                return Some(target);
+            }
+            s.graphs.keys().find(|k| k.ends_with(&target)).cloned()
+        }
+        None => s.graphs.keys().next().cloned(),
+    }
+}
+
+/// Get (or lazily start, once per session) a warm language server for the repo,
+/// as an `Option<Arc<dyn SemanticProvider>>` ready to hand to
+/// [`analyze_with`](crate::analysis::analyze_with). Resolved *before* the
+/// `with_graph` lock so the first call can block on indexing without holding the
+/// state mutex across the closure. Returns `None` when `semantic` is false, the
+/// `lsp` feature is off, or the server can't start (caller falls back to AST).
+fn resolve_semantic_provider(
+    state: &SharedState,
+    repository: Option<&str>,
+    semantic: bool,
+) -> Option<Arc<dyn crate::analysis::SemanticProvider>> {
+    if !semantic {
+        return None;
+    }
+    #[cfg(feature = "lsp")]
+    {
+        let mut s = state.lock().unwrap();
+        let root = resolve_root_key(&s, repository)?;
+        if let Some(cached) = s.providers.get(&root) {
+            return cached.clone().map(|p| p as Arc<dyn crate::analysis::SemanticProvider>);
+        }
+        // First request for this repo: start rust-analyzer (blocks on indexing).
+        let started = crate::analysis::LspProvider::start(&root).map(Arc::new);
+        s.providers.insert(root, started.clone());
+        started.map(|p| p as Arc<dyn crate::analysis::SemanticProvider>)
+    }
+    #[cfg(not(feature = "lsp"))]
+    {
+        let _ = (state, repository);
+        None
+    }
 }
 
 /// True for paths that hold test fixtures, examples, or vendored grammars rather
@@ -1248,6 +1313,11 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         .map(String::from);
     let path_filter = args.get("path").and_then(|v| v.as_str());
     let repo = args.get("repository").and_then(|v| v.as_str());
+    let semantic = args.get("semantic").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // Warm (or reuse) a language server before taking the graph lock, so its
+    // first-use indexing cost isn't paid while holding the state mutex.
+    let provider = resolve_semantic_provider(state, repo, semantic);
 
     with_graph(state, repo, |graph| {
         if !graph.has_annotations() {
@@ -1280,7 +1350,10 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
             config.structural_confirm_threshold = v;
         }
 
-        let findings = analysis::analyze(graph, &config);
+        let findings = match provider.as_deref() {
+            Some(p) => analysis::analyze_with(graph, &config, p),
+            None => analysis::analyze(graph, &config),
+        };
         let mut filtered: Vec<_> = findings
             .into_iter()
             .filter(|f| f.tier <= min_tier)
