@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use super::{Location, SemanticProvider};
+use super::{Location, Mutability, SemanticProvider};
 
 /// How long to wait for the server to finish its initial indexing before giving
 /// up and proceeding best-effort.
@@ -258,6 +258,38 @@ impl LspClient {
         Ok(out)
     }
 
+    /// Receiver mutability of the method call whose name is at `loc`, read from
+    /// the signature rust-analyzer shows on hover. `&mut self` ⇒ `Mutable`; a
+    /// `&self` / `self` / `mut self` receiver ⇒ `Shared`; no resolvable
+    /// signature ⇒ `None`.
+    fn receiver_mutability(&mut self, loc: &Location) -> io::Result<Option<Mutability>> {
+        let path = PathBuf::from(&loc.file);
+        let uri = path_to_uri(&path);
+        self.ensure_open(&path, &uri)?;
+
+        let result = self.request(
+            "textDocument/hover",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": loc.line.saturating_sub(1), "character": loc.col }
+            }),
+        )?;
+
+        let text = result
+            .pointer("/contents/value")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        // `&mut self` is checked first: a signature like `fn f(&self, x: &mut T)`
+        // contains `&mut` but not the substring `&mut self`, so it reads Shared.
+        Ok(if text.contains("&mut self") {
+            Some(Mutability::Mutable)
+        } else if text.contains("self") {
+            Some(Mutability::Shared)
+        } else {
+            None
+        })
+    }
+
     fn shutdown(&mut self) {
         let _ = self.request("shutdown", Value::Null);
         let _ = self.notify("exit", Value::Null);
@@ -319,6 +351,19 @@ impl SemanticProvider for LspProvider {
             Err(e) => {
                 if std::env::var_os("AST_CONTEXT_LSP_DEBUG").is_some() {
                     eprintln!("lsp references failed: {e}");
+                }
+                None
+            }
+        }
+    }
+
+    fn receiver_mutability(&self, loc: &Location) -> Option<Mutability> {
+        let mut client = self.client.lock().ok()?;
+        match client.receiver_mutability(loc) {
+            Ok(m) => m,
+            Err(e) => {
+                if std::env::var_os("AST_CONTEXT_LSP_DEBUG").is_some() {
+                    eprintln!("lsp receiver_mutability failed: {e}");
                 }
                 None
             }
@@ -400,5 +445,41 @@ mod tests {
         let loc = Location { file: file.to_string_lossy().into_owned(), line: line0 + 1, col };
         let refs = provider.references(&loc).expect("references answered");
         assert!(!refs.is_empty(), "SourceSpan is used; expected references");
+    }
+
+    // Hovers on a known `&mut self` method call (`Vec::push`) and a `&self` one
+    // (`<[_]>::contains`) and checks the resolved receiver mutability. Same
+    // gating as the references test. Run with:
+    //   cargo test --features lsp -- --ignored receiver_mutability_live
+    #[test]
+    #[ignore]
+    fn receiver_mutability_live() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let program = std::env::var("AST_CONTEXT_LSP_RA").unwrap_or_else(|_| "rust-analyzer".into());
+        let provider = LspProvider::start_with(&program, &root).expect("rust-analyzer should start");
+
+        let file = root.join("src/analysis/optimization/dataflow.rs");
+        let text = std::fs::read_to_string(&file).unwrap();
+
+        // Locate the method name immediately after a `.<needle>` call site.
+        let method_loc = |needle: &str| -> Location {
+            let (line0, col) = text
+                .lines()
+                .enumerate()
+                .find_map(|(i, l)| l.find(needle).map(|c| (i, c + 1))) // +1: past the '.'
+                .unwrap_or_else(|| panic!("{needle} present"));
+            Location { file: file.to_string_lossy().into_owned(), line: line0 + 1, col }
+        };
+
+        assert_eq!(
+            provider.receiver_mutability(&method_loc(".push(")),
+            Some(Mutability::Mutable),
+            "Vec::push takes &mut self"
+        );
+        assert_eq!(
+            provider.receiver_mutability(&method_loc(".contains(")),
+            Some(Mutability::Shared),
+            "slice::contains takes &self"
+        );
     }
 }

@@ -40,6 +40,12 @@ pub(super) struct UseDef {
     mutated: HashMap<String, Vec<usize>>,
     /// `(receiver_ident, byte_offset)` for each `<ident>.clone()` call.
     pub(super) clones: Vec<(String, usize)>,
+    /// Receiver-method calls whose effect on the receiver is *unknown* without
+    /// type info — i.e. neither a known mutator (`MUTATING_METHODS`) nor a
+    /// read-only clone. Stored as `(receiver, method, byte_offset, row, col)`
+    /// where `(row, col)` is the method name's position in the analyzed snippet,
+    /// for an optional language-server mutability lookup.
+    method_calls: Vec<(String, String, usize, usize, usize)>,
 }
 
 impl UseDef {
@@ -85,6 +91,22 @@ impl UseDef {
             .get(var)
             .is_some_and(|m| m.iter().any(|&p| p >= ls && p < le));
         !mutated_in_loop
+    }
+
+    /// Method calls on `var` inside the loop enclosing `pos` whose effect on
+    /// `var` is unknown without type info — returned as `(method, row, col)`
+    /// with the method name's snippet position. A caller with a language server
+    /// can resolve each one's receiver mutability to confirm (or refute) that a
+    /// clone the syntactic pass judged loop-invariant really is.
+    pub(super) fn unconfirmed_methods(&self, var: &str, pos: usize) -> Vec<(String, usize, usize)> {
+        let Some((ls, le)) = self.enclosing_loop(pos) else {
+            return Vec::new();
+        };
+        self.method_calls
+            .iter()
+            .filter(|(recv, _, off, _, _)| recv == var && *off >= ls && *off < le)
+            .map(|(_, method, _, row, col)| (method.clone(), *row, *col))
+            .collect()
     }
 }
 
@@ -133,15 +155,27 @@ fn walk(node: Node, src: &[u8], ud: &mut UseDef) {
         "call_expression" => {
             if let Some(func) = node.child_by_field_name("function") {
                 if func.kind() == "field_expression" {
-                    let method = func.child_by_field_name("field").and_then(|f| ident_text(f, src));
+                    let field = func.child_by_field_name("field");
+                    let method = field.and_then(|f| ident_text(f, src));
                     let receiver = func.child_by_field_name("value");
-                    if let (Some(method), Some(recv)) = (method, receiver) {
+                    if let (Some(method), Some(field), Some(recv)) = (method, field, receiver) {
                         if recv.kind() == "identifier" {
                             if let Some(rname) = ident_text(recv, src) {
                                 if method == "clone" {
                                     ud.clones.push((rname.to_string(), node.start_byte()));
                                 } else if MUTATING_METHODS.contains(&method) {
                                     ud.mutated.entry(rname.to_string()).or_default().push(node.start_byte());
+                                } else {
+                                    // Unknown effect without types — record for an
+                                    // optional language-server mutability check.
+                                    let p = field.start_position();
+                                    ud.method_calls.push((
+                                        rname.to_string(),
+                                        method.to_string(),
+                                        node.start_byte(),
+                                        p.row,
+                                        p.column,
+                                    ));
                                 }
                             }
                         }

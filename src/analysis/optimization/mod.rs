@@ -2,6 +2,7 @@ use crate::types::node::GraphNode;
 use crate::types::Language;
 use super::context::AnalysisContext;
 use super::helpers::{extract_receiver, is_loop_start, brace_delta};
+use super::semantic::{Location, Mutability};
 use super::types::{Tier, FindingKind, Finding};
 
 use std::collections::HashMap;
@@ -46,20 +47,43 @@ pub(super) fn detect_clone_in_loop(
         if let Some(ud) = dataflow::UseDef::analyze(src, func.language) {
             let mut seen = std::collections::HashSet::new();
             for (var, pos) in &ud.clones {
-                if ud.is_invariant_clone(var, *pos) && seen.insert(var.as_str()) {
-                    findings.push(Finding {
-                        tier: Tier::Medium, // provable, not a heuristic
-                        kind: FindingKind::CloneInLoop {
-                            function_name: func.name.clone(),
-                            pattern: format!("{var}.clone()"),
-                        },
-                        node_indices: vec![idx.index()],
-                        description: format!(
-                            "`{}`: `{}.clone()` is loop-invariant — hoist it above the loop and clone once.",
-                            func.name, var,
-                        ),
-                    });
+                if !ud.is_invariant_clone(var, *pos) || !seen.insert(var.as_str()) {
+                    continue;
                 }
+
+                // Semantic gate (Rust + language server): the syntactic pass uses
+                // a hardcoded list of mutating methods, so an exotic mutator it
+                // doesn't know about would let a non-invariant clone slip through
+                // — and we'd suggest a hoist that breaks the code. Ask the server
+                // for the real receiver mutability of each unknown method call on
+                // the cloned var inside the loop; if any actually takes `&mut
+                // self`, the value changes per iteration, so skip the finding.
+                if ctx.semantic.is_available() && func.language == Language::Rust {
+                    let mutated = ud.unconfirmed_methods(var, *pos).iter().any(|(_m, row, col)| {
+                        let loc = Location {
+                            file: func.path.to_string_lossy().into_owned(),
+                            line: func.span.start_line as usize + row,
+                            col: *col,
+                        };
+                        ctx.semantic.receiver_mutability(&loc) == Some(Mutability::Mutable)
+                    });
+                    if mutated {
+                        continue;
+                    }
+                }
+
+                findings.push(Finding {
+                    tier: Tier::Medium, // provable, not a heuristic
+                    kind: FindingKind::CloneInLoop {
+                        function_name: func.name.clone(),
+                        pattern: format!("{var}.clone()"),
+                    },
+                    node_indices: vec![idx.index()],
+                    description: format!(
+                        "`{}`: `{}.clone()` is loop-invariant — hoist it above the loop and clone once.",
+                        func.name, var,
+                    ),
+                });
             }
             continue;
         }
