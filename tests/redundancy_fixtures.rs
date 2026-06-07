@@ -1,7 +1,7 @@
 //! Table-driven fixture tests for the redundancy analysis engine.
 //!
 //! Each case points at a directory under `tests/fixtures/redundancy/` and asserts
-//! that `redundancy::analyze` does (positive) or does not (negative) report a
+//! that `analysis::analyze` does (positive) or does not (negative) report a
 //! given finding kind. Tests run against `analyze()` directly, which is
 //! deterministic — the random sampling lives only in the CLI/MCP presentation
 //! layer, so it doesn't affect these assertions.
@@ -14,7 +14,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use ast_context::redundancy::{self, AnalysisConfig, Finding, FindingKind};
+use ast_context::analysis::{self, AnalysisConfig, Finding, FindingKind};
 use ast_context::GraphBuilder;
 
 /// Build an annotated graph for a fixture dir and run the full analysis.
@@ -27,7 +27,7 @@ fn analyze_fixture(rel_dir: &str) -> Vec<Finding> {
     // annotate = true so source snippets and structural fingerprints exist.
     let graph = GraphBuilder::build_full_with_options(&dir, true, &[], None, false)
         .expect("graph build should succeed");
-    redundancy::analyze(&graph, &AnalysisConfig::default())
+    analysis::analyze(&graph, &AnalysisConfig::default())
 }
 
 fn count<F: Fn(&FindingKind) -> bool>(findings: &[Finding], pred: F) -> usize {

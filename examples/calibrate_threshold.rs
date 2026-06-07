@@ -19,7 +19,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 
-use ast_context::redundancy::{self, AnalysisConfig, FindingKind};
+use ast_context::analysis::{self, AnalysisConfig, FindingKind};
 use ast_context::types::node::GraphNode;
 use ast_context::{CodeGraph, GraphBuilder};
 
@@ -69,7 +69,7 @@ fn flagged_pairs(graph: &CodeGraph, threshold: f64) -> BTreeSet<(String, String)
         ..Default::default()
     };
     let mut pairs = BTreeSet::new();
-    for finding in redundancy::analyze(graph, &config) {
+    for finding in analysis::analyze(graph, &config) {
         let names = match &finding.kind {
             FindingKind::NearDuplicate { names, .. }
             | FindingKind::StructurallySimilar { names, .. } => names,

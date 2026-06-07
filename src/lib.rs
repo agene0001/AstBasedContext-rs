@@ -2,7 +2,7 @@ pub mod annotate;
 pub mod error;
 pub mod graph;
 pub mod parser;
-pub mod redundancy;
+pub mod analysis;
 pub mod serialize;
 pub mod types;
 pub mod walker;

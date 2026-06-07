@@ -2,19 +2,19 @@ use crate::types::EdgeKind;
 use crate::types::node::GraphNode;
 use petgraph::graph::NodeIndex;
 use std::collections::HashSet;
-use super::context::AnalysisContext;
-use super::helpers::estimate_sections;
-use super::helpers::extract_tokens_set;
-use super::helpers::jaccard_sets;
-use super::helpers::normalize_tokens_set;
-use super::types::{Tier, FindingKind, Finding};
+use super::super::context::AnalysisContext;
+use super::super::helpers::estimate_sections;
+use super::super::helpers::extract_tokens_set;
+use super::super::helpers::jaccard_sets;
+use super::super::helpers::normalize_tokens_set;
+use super::super::types::{Tier, FindingKind, Finding};
 use crate::types::Language;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 1: Passthrough wrappers
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn find_passthroughs(
+pub(crate) fn find_passthroughs(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -208,7 +208,7 @@ fn should_skip_near_duplicate(node_a: &GraphNode, node_b: &GraphNode) -> bool {
 // Check 2: Near-duplicates (normalized source comparison)
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn find_near_duplicates(
+pub(crate) fn find_near_duplicates(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -293,7 +293,7 @@ pub(super) fn find_near_duplicates(
 // Check 3: Structural similarity (existing approach, but with tier context)
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn find_structural_similar(
+pub(crate) fn find_structural_similar(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -372,7 +372,7 @@ pub(super) fn find_structural_similar(
 // Check 4: Merge candidates — functions with a shared core but different branches
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn find_merge_candidates(
+pub(crate) fn find_merge_candidates(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -449,7 +449,7 @@ pub(super) fn find_merge_candidates(
 // Check 5: Split candidates — functions that are too big and do too many things
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn find_split_candidates(
+pub(crate) fn find_split_candidates(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {

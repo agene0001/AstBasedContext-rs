@@ -33,8 +33,8 @@ petgraph = { version = "0.8.3", features = ["serde-1"] }
 
 # MCP / serialization
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-log = "0.4.30"
+serde_json = "1.0.150"
+log = "0.4.32"
 env_logger = "0.11"
 
 # Core analysis
@@ -55,7 +55,7 @@ tree-sitter-swift = "0.7.3"
 # TODO: Add tree-sitter-kotlin (currently skipped due to dependency issues: crates.io version targets tree-sitter <0.23, and vendoring parser.c is impractical due to 23MB size)
 # tree-sitter-dart: vendored via grammars/dart/ (crates.io version targets tree-sitter <0.26)
 thiserror = "2.0.18"
-ignore = "0.4.25"
+ignore = "0.4.26"
 rayon = "1.12"
 streaming-iterator = "0.1.9"
 notify-debouncer-full = "0.7"

@@ -645,6 +645,14 @@ pub enum FindingKind {
         variable_hint: String,
     },
 
+    /// Struct fields ordered sub-optimally, leaving recoverable padding.
+    StructLayout {
+        struct_name: String,
+        current_size: usize,
+        optimal_size: usize,
+        suggested_order: Vec<String>,
+    },
+
     /// Vec of tuples searched with .iter().find(|(k,_)| ...) → use HashMap/dict.
     VecUsedAsMap {
         function_name: String,
@@ -1093,6 +1101,8 @@ impl FindingKind {
             | FindingKind::HashMapWithSequentialKeys { .. }
             | FindingKind::ExcessiveCollectIterate { .. } => "data_structures",
 
+            FindingKind::StructLayout { .. } => "memory_layout",
+
             FindingKind::UnusedImport { .. }
             | FindingKind::InconsistentErrorHandling { .. }
             | FindingKind::RepeatedQualifiedPath { .. }
@@ -1240,6 +1250,7 @@ impl FindingKind {
             FindingKind::ExcessiveCollectIterate { .. } => "CI=collect-iterate",
             FindingKind::UnusedImport { .. } => "UI=unused-import",
             FindingKind::RepeatedQualifiedPath { .. } => "RQP=repeated-qualified-path",
+            FindingKind::StructLayout { .. } => "SL=struct-layout",
             FindingKind::InconsistentErrorHandling { .. } => "IEH=inconsistent-error",
             FindingKind::TechDebtComment { .. } => "TD=tech-debt",
             FindingKind::CloneInLoop { .. } => "CIL=clone-in-loop",

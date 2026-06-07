@@ -6,6 +6,11 @@ use super::types::{Tier, FindingKind, Finding};
 
 use std::collections::HashMap;
 
+mod dataflow;
+mod layout;
+pub mod data_structures;
+pub(super) use layout::detect_struct_layout;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 103: Clone / allocation in loop
 // ─────────────────────────────────────────────────────────────────────────────
@@ -34,10 +39,35 @@ pub(super) fn detect_clone_in_loop(
             Some(s) => s,
             None => continue,
         };
-        if src.lines().count() < 5 {
+
+        // Good-faith path (Rust): use-def analysis flags only PROVABLY
+        // loop-invariant clones — the same value every iteration, safe to hoist
+        // and clone once. This replaces the guess for languages we can analyze.
+        if let Some(ud) = dataflow::UseDef::analyze(src, func.language) {
+            let mut seen = std::collections::HashSet::new();
+            for (var, pos) in &ud.clones {
+                if ud.is_invariant_clone(var, *pos) && seen.insert(var.as_str()) {
+                    findings.push(Finding {
+                        tier: Tier::Medium, // provable, not a heuristic
+                        kind: FindingKind::CloneInLoop {
+                            function_name: func.name.clone(),
+                            pattern: format!("{var}.clone()"),
+                        },
+                        node_indices: vec![idx.index()],
+                        description: format!(
+                            "`{}`: `{}.clone()` is loop-invariant — hoist it above the loop and clone once.",
+                            func.name, var,
+                        ),
+                    });
+                }
+            }
             continue;
         }
 
+        // Fallback heuristic (languages without use-def yet): textual hint, Low.
+        if src.lines().count() < 5 {
+            continue;
+        }
         let mut in_loop = false;
         let mut loop_depth: i32 = 0;
         let mut brace_at_loop_start: i32 = 0;

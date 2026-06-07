@@ -3,15 +3,15 @@ use crate::types::node::GraphNode;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use super::context::AnalysisContext;
-use super::types::{Tier, FindingKind, Finding};
+use super::super::context::AnalysisContext;
+use super::super::types::{Tier, FindingKind, Finding};
 use std::path::Path;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 11: Suggest facade — external modules calling many internals of one module
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn suggest_facade(
+pub(crate) fn suggest_facade(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -94,7 +94,7 @@ pub(super) fn suggest_facade(
 // Check 12: Suggest factory — scattered constructor calls to sibling classes
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn suggest_factory(
+pub(crate) fn suggest_factory(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -191,7 +191,7 @@ pub(super) fn suggest_factory(
 // Check 13: Suggest builder — functions/constructors with too many parameters
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn suggest_builder(
+pub(crate) fn suggest_builder(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -242,7 +242,7 @@ pub(super) fn suggest_builder(
 // Check 14: Suggest strategy — trait/interface with multiple implementors
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn suggest_strategy(
+pub(crate) fn suggest_strategy(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -336,7 +336,7 @@ pub(super) fn suggest_strategy(
 // Check 15: Suggest template method — base class with consistently overridden methods
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn suggest_template_method(
+pub(crate) fn suggest_template_method(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -426,7 +426,7 @@ pub(super) fn suggest_template_method(
 // Check 16: Suggest observer — high fan-in from unrelated modules
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn suggest_observer(
+pub(crate) fn suggest_observer(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -491,7 +491,7 @@ pub(super) fn suggest_observer(
 // Check 17: Suggest decorator — wrapper with before/after logic (noisy)
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn suggest_decorator(
+pub(crate) fn suggest_decorator(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -560,7 +560,7 @@ pub(super) fn suggest_decorator(
 // Check 18: Suggest mediator — module with high fan-in AND fan-out (noisy)
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn suggest_mediator(
+pub(crate) fn suggest_mediator(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {

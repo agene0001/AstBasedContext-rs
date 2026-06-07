@@ -172,7 +172,7 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                                  "anti_patterns", "pattern_detection", "structural", "type_system",
                                  "metrics", "risk", "testing", "blast_radius", "api_surface",
                                  "cross_language", "config_detection", "data_structures",
-                                 "code_quality", "optimization"]
+                                 "code_quality", "optimization", "memory_layout"]
                     },
                     "min_tier": {
                         "type": "string",
@@ -1197,7 +1197,7 @@ fn handle_find_similar(state: &SharedState, args: &serde_json::Value) -> ToolRes
 }
 
 fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> ToolResult {
-    use crate::redundancy::{self, AnalysisConfig, Tier};
+    use crate::analysis::{self, AnalysisConfig, Tier};
 
     let min_tier = match args
         .get("min_tier")
@@ -1280,7 +1280,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
             config.structural_confirm_threshold = v;
         }
 
-        let findings = redundancy::analyze(graph, &config);
+        let findings = analysis::analyze(graph, &config);
         let mut filtered: Vec<_> = findings
             .into_iter()
             .filter(|f| f.tier <= min_tier)
@@ -1316,7 +1316,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
         // past a flood of false positives (mostly the now-clustered pairwise
         // SuggestParameterStruct findings); with that fixed, stable output is
         // preferable (reproducible, cache-friendly, no re-examining churn).
-        let is_secondary_finding = |f: &redundancy::Finding| {
+        let is_secondary_finding = |f: &analysis::Finding| {
             !f.node_indices.is_empty()
                 && f.node_indices.iter().all(|&ni| {
                     graph
@@ -1446,7 +1446,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                 // is tiny by definition (cc=1, a few lines). Inline it so the model
                 // doesn't spend a heavy get_context call just to confirm the
                 // delegation it was already told about.
-                if let redundancy::FindingKind::Passthrough { wrapper_name, .. } = &finding.kind {
+                if let analysis::FindingKind::Passthrough { wrapper_name, .. } = &finding.kind {
                     // Locate the wrapper by name (node_indices is now sorted, so
                     // position is no longer meaningful).
                     if let Some(node) = finding

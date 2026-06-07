@@ -1,15 +1,15 @@
 use crate::types::node::GraphNode;
 use petgraph::graph::NodeIndex;
 use std::collections::HashSet;
-use super::context::AnalysisContext;
-use super::helpers::{extract_field_names, normalize_field_name};
-use super::types::{Tier, FindingKind, Finding};
+use super::super::context::AnalysisContext;
+use super::super::helpers::{extract_field_names, normalize_field_name};
+use super::super::types::{Tier, FindingKind, Finding};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 6: Overlapping structs — structs with heavily shared field names
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn find_overlapping_structs(
+pub(crate) fn find_overlapping_structs(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -110,7 +110,7 @@ pub(super) fn find_overlapping_structs(
 // Check 7: Overlapping enums — enums with shared variant names
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn find_overlapping_enums(
+pub(crate) fn find_overlapping_enums(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {

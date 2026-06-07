@@ -584,17 +584,17 @@ fn main() {
             let g = load_graph(&graph);
 
             let min_tier = match tier.to_lowercase().as_str() {
-                "critical" => redundancy::Tier::Critical,
-                "high" => redundancy::Tier::High,
-                "medium" => redundancy::Tier::Medium,
-                "low" => redundancy::Tier::Low,
+                "critical" => analysis::Tier::Critical,
+                "high" => analysis::Tier::High,
+                "medium" => analysis::Tier::Medium,
+                "low" => analysis::Tier::Low,
                 _ => {
                     eprintln!("Unknown tier: {tier}. Use: critical, high, medium, low");
                     process::exit(1);
                 }
             };
 
-            let config = redundancy::AnalysisConfig {
+            let config = analysis::AnalysisConfig {
                 min_lines,
                 split_complexity_threshold: split_complexity,
                 split_line_threshold: split_lines,
@@ -607,7 +607,7 @@ fn main() {
                 ..Default::default()
             };
 
-            let findings = redundancy::analyze(&g, &config);
+            let findings = analysis::analyze(&g, &config);
             let mut filtered: Vec<_> = findings
                 .into_iter()
                 .filter(|f| f.tier <= min_tier)
@@ -645,10 +645,10 @@ fn main() {
                 let tag = finding.kind.short_code();
 
                 let tier_flag = match finding.tier {
-                    redundancy::Tier::Critical => "C",
-                    redundancy::Tier::High => "H",
-                    redundancy::Tier::Medium => "M",
-                    redundancy::Tier::Low => "L",
+                    analysis::Tier::Critical => "C",
+                    analysis::Tier::High => "H",
+                    analysis::Tier::Medium => "M",
+                    analysis::Tier::Low => "L",
                 };
 
                 println!("[{tier_flag}][{tag}] {}", finding.description);
@@ -700,19 +700,19 @@ fn main() {
                 filtered.len(),
                 filtered
                     .iter()
-                    .filter(|f| f.tier == redundancy::Tier::Critical)
+                    .filter(|f| f.tier == analysis::Tier::Critical)
                     .count(),
                 filtered
                     .iter()
-                    .filter(|f| f.tier == redundancy::Tier::High)
+                    .filter(|f| f.tier == analysis::Tier::High)
                     .count(),
                 filtered
                     .iter()
-                    .filter(|f| f.tier == redundancy::Tier::Medium)
+                    .filter(|f| f.tier == analysis::Tier::Medium)
                     .count(),
                 filtered
                     .iter()
-                    .filter(|f| f.tier == redundancy::Tier::Low)
+                    .filter(|f| f.tier == analysis::Tier::Low)
                     .count(),
             );
         }

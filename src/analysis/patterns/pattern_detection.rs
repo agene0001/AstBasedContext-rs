@@ -2,14 +2,14 @@ use crate::types::EdgeKind;
 use crate::types::node::GraphNode;
 use petgraph::graph::NodeIndex;
 use std::collections::HashSet;
-use super::context::AnalysisContext;
-use super::types::{Tier, FindingKind, Finding};
+use super::super::context::AnalysisContext;
+use super::super::types::{Tier, FindingKind, Finding};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 23: Singleton — private constructor + static self-typed field + accessor
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_singleton(
+pub(crate) fn detect_singleton(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -87,7 +87,7 @@ pub(super) fn detect_singleton(
 // Check 24: Adapter — wraps a different type, implements an interface
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_adapter(
+pub(crate) fn detect_adapter(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -170,7 +170,7 @@ pub(super) fn detect_adapter(
 // Check 25: Proxy — wraps same-interface type, delegates
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_proxy(
+pub(crate) fn detect_proxy(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -223,7 +223,7 @@ pub(super) fn detect_proxy(
 // Check 26: Command — multiple classes implement a single-method interface
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_command(
+pub(crate) fn detect_command(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -287,7 +287,7 @@ pub(super) fn detect_command(
 // Check 27: Chain of Responsibility — self-referencing field + conditional delegation
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_chain_of_responsibility(
+pub(crate) fn detect_chain_of_responsibility(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -348,7 +348,7 @@ pub(super) fn detect_chain_of_responsibility(
 // Check 28: Dependency Injection — constructor params typed as interfaces
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_dependency_injection(
+pub(crate) fn detect_dependency_injection(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -447,7 +447,7 @@ pub(super) fn detect_dependency_injection(
 // Check 38: Visitor pattern
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_visitor(
+pub(crate) fn detect_visitor(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -506,7 +506,7 @@ pub(super) fn detect_visitor(
 // Check 39: Iterator pattern
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_iterator(
+pub(crate) fn detect_iterator(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -561,7 +561,7 @@ pub(super) fn detect_iterator(
 // Check 40: State pattern
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_state(
+pub(crate) fn detect_state(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -624,7 +624,7 @@ pub(super) fn detect_state(
 // Check 41: Composite pattern
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_composite(
+pub(crate) fn detect_composite(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -708,7 +708,7 @@ pub(super) fn detect_composite(
 // Check 42: Repository pattern
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_repository(
+pub(crate) fn detect_repository(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -780,7 +780,7 @@ pub(super) fn detect_repository(
 // Check 43: Prototype pattern
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_prototype(
+pub(crate) fn detect_prototype(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -834,7 +834,7 @@ pub(super) fn detect_prototype(
 // Check 51: Flyweight pattern
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_flyweight(
+pub(crate) fn detect_flyweight(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -894,7 +894,7 @@ pub(super) fn detect_flyweight(
 // Check 52: Event emitter / observer (method-based)
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_event_emitter(
+pub(crate) fn detect_event_emitter(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -950,7 +950,7 @@ pub(super) fn detect_event_emitter(
 // Check 53: Memento pattern
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_memento(
+pub(crate) fn detect_memento(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -1002,7 +1002,7 @@ pub(super) fn detect_memento(
 // Check 54: Fluent builder (detected)
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_fluent_builder(
+pub(crate) fn detect_fluent_builder(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -1061,7 +1061,7 @@ pub(super) fn detect_fluent_builder(
 // Check 55: Null object pattern
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_null_object(
+pub(crate) fn detect_null_object(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {

@@ -11,24 +11,28 @@ mod context;
 mod helpers;
 mod types;
 
-mod anti_patterns;
+// Flat (cross-cutting) categories that don't group under a single theme.
 mod api_surface;
 mod blast_radius;
 mod code_quality;
 mod config_detection;
 mod cross_language;
-mod data_structures;
-mod design_patterns;
-mod function_checks;
 mod metrics;
-mod optimization;
-mod pattern_detection;
 mod risk;
-mod struct_enum;
 mod structural;
 mod testing;
-mod type_suggestions;
 mod type_system;
+
+// Themed check groups. The submodules are re-imported below so the orchestrator
+// call sites (`function_checks::…`, `anti_patterns::…`, `data_structures::…`)
+// stay unchanged.
+mod optimization;
+mod patterns;
+mod redundancy;
+
+use optimization::data_structures;
+use patterns::{anti_patterns, design_patterns, pattern_detection};
+use redundancy::{function_checks, struct_enum, type_suggestions};
 
 pub use types::{AnalysisConfig, Finding, FindingKind, Tier};
 
@@ -615,6 +619,11 @@ pub fn analyze(graph: &CodeGraph, config: &AnalysisConfig) -> Vec<Finding> {
     // ── Repeated fully-qualified path → suggest `use` alias (Low) ───────
     if cat_ok("code_quality") && !skip("code_quality") && !skip("detect_repeated_qualified_paths") {
         code_quality::detect_repeated_qualified_paths(&ctx, &mut findings);
+    }
+
+    // ── Struct layout / padding (computed, high-precision) ─────────────
+    if cat_ok("memory_layout") && !skip("memory_layout") && !skip("detect_struct_layout") {
+        optimization::detect_struct_layout(&ctx, &mut findings);
     }
 
     // ── Optimization Suggestions ──────────────────────────────────────

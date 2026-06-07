@@ -3,9 +3,9 @@ use crate::types::node::GraphNode;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use super::context::AnalysisContext;
-use super::helpers::p_min_len;
-use super::types::{Tier, FindingKind, Finding};
+use super::super::context::AnalysisContext;
+use super::super::helpers::p_min_len;
+use super::super::types::{Tier, FindingKind, Finding};
 use petgraph::Direction;
 use std::path::Path;
 
@@ -13,7 +13,7 @@ use std::path::Path;
 // Check 19: God class/module — too many methods or functions in one place
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_god_class(
+pub(crate) fn detect_god_class(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -72,7 +72,7 @@ pub(super) fn detect_god_class(
 // Check 20: Circular dependencies — cycles in the module import graph
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_circular_dependencies(
+pub(crate) fn detect_circular_dependencies(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -189,7 +189,7 @@ pub(super) fn detect_circular_dependencies(
 // Check 21: Feature envy — function uses another class more than its own
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_feature_envy(
+pub(crate) fn detect_feature_envy(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -277,7 +277,7 @@ pub(super) fn detect_feature_envy(
 // Check 22: Shotgun surgery — changing a function affects many modules
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_shotgun_surgery(
+pub(crate) fn detect_shotgun_surgery(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -349,7 +349,7 @@ pub(super) fn detect_shotgun_surgery(
 // Check 29: Dead code
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_dead_code(
+pub(crate) fn detect_dead_code(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -447,7 +447,7 @@ pub(super) fn detect_dead_code(
 // Check 30: Long parameter list
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_long_parameter_list(
+pub(crate) fn detect_long_parameter_list(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -481,7 +481,7 @@ pub(super) fn detect_long_parameter_list(
 // Check 31: Data clumps
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_data_clumps(
+pub(crate) fn detect_data_clumps(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -567,7 +567,7 @@ pub(super) fn detect_data_clumps(
 // Check 32: Middle man
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_middle_man(
+pub(crate) fn detect_middle_man(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -645,7 +645,7 @@ pub(super) fn detect_middle_man(
 // Check 33: Lazy class
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_lazy_class(
+pub(crate) fn detect_lazy_class(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -702,7 +702,7 @@ pub(super) fn detect_lazy_class(
 // Check 34: Refused bequest
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_refused_bequest(
+pub(crate) fn detect_refused_bequest(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -809,7 +809,7 @@ pub(super) fn detect_refused_bequest(
 // Check 35: Speculative generality
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_speculative_generality(
+pub(crate) fn detect_speculative_generality(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -850,7 +850,7 @@ pub(super) fn detect_speculative_generality(
 // Check 36: Inappropriate intimacy
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_inappropriate_intimacy(
+pub(crate) fn detect_inappropriate_intimacy(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -930,7 +930,7 @@ pub(super) fn detect_inappropriate_intimacy(
 // Check 37: Deep nesting / high complexity
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_deep_nesting(
+pub(crate) fn detect_deep_nesting(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -965,7 +965,7 @@ pub(super) fn detect_deep_nesting(
 // Check 46: Divergent change
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_divergent_change(
+pub(crate) fn detect_divergent_change(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -1025,7 +1025,7 @@ pub(super) fn detect_divergent_change(
 // Check 47: Parallel inheritance
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_parallel_inheritance(
+pub(crate) fn detect_parallel_inheritance(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -1108,7 +1108,7 @@ pub(super) fn detect_parallel_inheritance(
 // Check 48: Primitive obsession
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_primitive_obsession(
+pub(crate) fn detect_primitive_obsession(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -1170,7 +1170,7 @@ pub(super) fn detect_primitive_obsession(
 // Check 49: Large class
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_large_class(
+pub(crate) fn detect_large_class(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -1207,7 +1207,7 @@ pub(super) fn detect_large_class(
 // Check 50: Unstable dependency
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_unstable_dependency(
+pub(crate) fn detect_unstable_dependency(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -1306,7 +1306,7 @@ pub(super) fn detect_unstable_dependency(
 // Check 64: Anemic domain model
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_anemic_domain_model(
+pub(crate) fn detect_anemic_domain_model(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -1365,7 +1365,7 @@ pub(super) fn detect_anemic_domain_model(
 // Check 65: Magic numbers/strings
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_magic_numbers(
+pub(crate) fn detect_magic_numbers(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -1434,7 +1434,7 @@ pub(super) fn detect_magic_numbers(
 // Check 66: Mutable global state
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_mutable_global_state(
+pub(crate) fn detect_mutable_global_state(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -1486,7 +1486,7 @@ pub(super) fn detect_mutable_global_state(
 // Check 67: Empty catch
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_empty_catch(
+pub(crate) fn detect_empty_catch(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -1538,7 +1538,7 @@ pub(super) fn detect_empty_catch(
 // Check 68: Callback hell
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_callback_hell(
+pub(crate) fn detect_callback_hell(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -1598,7 +1598,7 @@ pub(super) fn detect_callback_hell(
 // Check 69: API inconsistency
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_api_inconsistency(
+pub(crate) fn detect_api_inconsistency(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {

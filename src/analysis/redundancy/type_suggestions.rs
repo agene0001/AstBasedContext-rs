@@ -2,14 +2,14 @@ use crate::types::node::GraphNode;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use super::context::AnalysisContext;
-use super::types::{Tier, FindingKind, Finding};
+use super::super::context::AnalysisContext;
+use super::super::types::{Tier, FindingKind, Finding};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 8: Suggest parameter structs — functions sharing many params
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn suggest_parameter_structs(
+pub(crate) fn suggest_parameter_structs(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -124,7 +124,7 @@ impl UnionFind {
 // Check 9: Suggest enum dispatch — boolean/flag params that control branching
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn suggest_enum_dispatch(
+pub(crate) fn suggest_enum_dispatch(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -221,7 +221,7 @@ pub(super) fn suggest_enum_dispatch(
 // Check 10: Suggest trait extraction — classes/structs with overlapping methods
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn suggest_trait_extraction(
+pub(crate) fn suggest_trait_extraction(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {

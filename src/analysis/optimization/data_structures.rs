@@ -1,14 +1,14 @@
 use crate::types::node::GraphNode;
 use crate::types::Language;
-use super::context::AnalysisContext;
-use super::helpers::{extract_receiver, is_loop_start, brace_delta};
-use super::types::{Tier, FindingKind, Finding};
+use super::super::context::AnalysisContext;
+use super::super::helpers::{extract_receiver, is_loop_start, brace_delta};
+use super::super::types::{Tier, FindingKind, Finding};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Check 92: Vec used as Set
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_vec_used_as_set(
+pub(crate) fn detect_vec_used_as_set(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -104,7 +104,7 @@ pub(super) fn detect_vec_used_as_set(
 // Check 93: Vec used as Map
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_vec_used_as_map(
+pub(crate) fn detect_vec_used_as_map(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -157,7 +157,7 @@ pub(super) fn detect_vec_used_as_map(
 // Check 94: Linear search in loop
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_linear_search_in_loop(
+pub(crate) fn detect_linear_search_in_loop(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -276,7 +276,7 @@ pub(super) fn detect_linear_search_in_loop(
 // Check 95: String concatenation in loop
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_string_concat_in_loop(
+pub(crate) fn detect_string_concat_in_loop(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -389,7 +389,7 @@ pub(super) fn detect_string_concat_in_loop(
 // Check 96: Sorted Vec for lookup
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_sorted_vec_for_lookup(
+pub(crate) fn detect_sorted_vec_for_lookup(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -457,7 +457,7 @@ pub(super) fn detect_sorted_vec_for_lookup(
 // Check 97: Nested loop lookup
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_nested_loop_lookup(
+pub(crate) fn detect_nested_loop_lookup(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -550,7 +550,7 @@ pub(super) fn detect_nested_loop_lookup(
 // Check 98: HashMap with sequential integer keys
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn detect_hashmap_sequential_keys(
+pub(crate) fn detect_hashmap_sequential_keys(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
@@ -646,7 +646,7 @@ pub(super) fn detect_hashmap_sequential_keys(
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[allow(unused_assignments)]
-pub(super) fn detect_excessive_collect_iterate(
+pub(crate) fn detect_excessive_collect_iterate(
     ctx: &AnalysisContext,
     findings: &mut Vec<Finding>,
 ) {
