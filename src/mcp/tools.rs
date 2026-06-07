@@ -202,7 +202,7 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                     },
                     "semantic": {
                         "type": "boolean",
-                        "description": "Confirm findings with a language server (rust-analyzer) instead of syntactic heuristics — e.g. dead code is verified against real references (resolving macros, fn-pointers, trait dispatch). SLOWER: the server loads/indexes the project (which must build) on first use this session, then stays warm. Rust only; requires rust-analyzer on PATH. Default false."
+                        "description": "Confirm findings with a language server (rust-analyzer) instead of syntactic heuristics — e.g. dead code is verified against real references (resolving macros, fn-pointers, trait dispatch). SLOWER: the server loads/indexes the project (which must build) on first use this session, then stays warm. Rust only; requires rust-analyzer on PATH. If the server can't start, the call returns an error rather than falling back to noisy heuristics. Default false."
                     }
                 }
             }),
@@ -483,6 +483,7 @@ where
 /// Resolve a `repository` argument to the root key under which a graph is
 /// indexed, mirroring [`with_graph`]'s exact-then-suffix matching. Used to key
 /// the language-server cache by the same root the graph lives under.
+#[cfg(feature = "lsp")]
 fn resolve_root_key(s: &ServerState, repository: Option<&str>) -> Option<PathBuf> {
     if s.graphs.is_empty() {
         return None;
@@ -499,36 +500,69 @@ fn resolve_root_key(s: &ServerState, repository: Option<&str>) -> Option<PathBuf
     }
 }
 
-/// Get (or lazily start, once per session) a warm language server for the repo,
-/// as an `Option<Arc<dyn SemanticProvider>>` ready to hand to
-/// [`analyze_with`](crate::analysis::analyze_with). Resolved *before* the
-/// `with_graph` lock so the first call can block on indexing without holding the
-/// state mutex across the closure. Returns `None` when `semantic` is false, the
-/// `lsp` feature is off, or the server can't start (caller falls back to AST).
-fn resolve_semantic_provider(
+/// Outcome of resolving the optional language server for a request.
+enum Semantic {
+    /// `semantic` was not requested — run the AST path.
+    Off,
+    /// A warm provider is ready.
+    #[cfg(feature = "lsp")]
+    Ready(Arc<dyn crate::analysis::SemanticProvider>),
+    /// `semantic` was requested but no provider could be supplied; carries a
+    /// caller-facing explanation. We surface this instead of silently running
+    /// the noisy heuristic path — semantic mode is a contract for confirmed
+    /// results.
+    Unavailable(String),
+}
+
+/// Get (or lazily start, once per session) a warm language server for the repo.
+/// Resolved *before* the `with_graph` lock so the first call can block on
+/// indexing without holding the state mutex across the closure.
+fn resolve_semantic(
     state: &SharedState,
     repository: Option<&str>,
     semantic: bool,
-) -> Option<Arc<dyn crate::analysis::SemanticProvider>> {
+) -> Semantic {
     if !semantic {
-        return None;
+        return Semantic::Off;
     }
     #[cfg(feature = "lsp")]
     {
         let mut s = state.lock().unwrap();
-        let root = resolve_root_key(&s, repository)?;
-        if let Some(cached) = s.providers.get(&root) {
-            return cached.clone().map(|p| p as Arc<dyn crate::analysis::SemanticProvider>);
+        let Some(root) = resolve_root_key(&s, repository) else {
+            return Semantic::Unavailable(
+                "semantic=true requested, but no indexed repository is available to root a \
+                 language server. Index a directory first."
+                    .into(),
+            );
+        };
+        let started = match s.providers.get(&root) {
+            Some(cached) => cached.clone(),
+            None => {
+                // First request for this repo: start rust-analyzer (blocks on indexing).
+                let started = crate::analysis::LspProvider::start(&root).map(Arc::new);
+                s.providers.insert(root.clone(), started.clone());
+                started
+            }
+        };
+        match started {
+            Some(p) => Semantic::Ready(p),
+            None => Semantic::Unavailable(format!(
+                "semantic=true requested, but rust-analyzer could not start for {}. \
+                 Is it on PATH (or AST_CONTEXT_RUST_ANALYZER set)? Does the project build? \
+                 Re-run with semantic=false for heuristic results — not returning unconfirmed \
+                 heuristic findings.",
+                root.display()
+            )),
         }
-        // First request for this repo: start rust-analyzer (blocks on indexing).
-        let started = crate::analysis::LspProvider::start(&root).map(Arc::new);
-        s.providers.insert(root, started.clone());
-        started.map(|p| p as Arc<dyn crate::analysis::SemanticProvider>)
     }
     #[cfg(not(feature = "lsp"))]
     {
         let _ = (state, repository);
-        None
+        Semantic::Unavailable(
+            "semantic=true requested, but this server was built without the `lsp` feature. \
+             Re-run with semantic=false for heuristic results."
+                .into(),
+        )
     }
 }
 
@@ -1316,8 +1350,21 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
     let semantic = args.get("semantic").and_then(|v| v.as_bool()).unwrap_or(false);
 
     // Warm (or reuse) a language server before taking the graph lock, so its
-    // first-use indexing cost isn't paid while holding the state mutex.
-    let provider = resolve_semantic_provider(state, repo, semantic);
+    // first-use indexing cost isn't paid while holding the state mutex. If
+    // semantic was requested but can't be satisfied, say so plainly rather than
+    // fall back to the noisy heuristic path.
+    let provider: Option<Arc<dyn analysis::SemanticProvider>> =
+        match resolve_semantic(state, repo, semantic) {
+        Semantic::Off => None,
+        #[cfg(feature = "lsp")]
+        Semantic::Ready(p) => Some(p),
+        Semantic::Unavailable(msg) => {
+            return ToolResult {
+                content: vec![ToolContent::text(msg)],
+                is_error: Some(true),
+            };
+        }
+    };
 
     with_graph(state, repo, |graph| {
         if !graph.has_annotations() {

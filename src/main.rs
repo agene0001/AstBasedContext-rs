@@ -808,10 +808,11 @@ fn load_graph(path: &Path) -> CodeGraph {
     }
 }
 
-/// Run the analysis, optionally backed by a language server. When `semantic` is
-/// set and the `lsp` feature is built in, this starts rust-analyzer for the
-/// current directory and routes findings through it; on any failure it warns and
-/// degrades to the pure-AST path so the command always produces output.
+/// Run the analysis, optionally backed by a language server. With `--semantic`,
+/// findings are routed through rust-analyzer (started for the current
+/// directory). If the server can't start, this does NOT fall back to the
+/// heuristic-only path: semantic mode is a contract for confirmed results, so we
+/// fail with a clear message rather than hand back noisy guesses.
 #[cfg(feature = "lsp")]
 fn run_redundancy(
     g: &CodeGraph,
@@ -829,10 +830,13 @@ fn run_redundancy(
         }
         None => {
             eprintln!(
-                "semantic mode requested but rust-analyzer could not start \
-                 (is it on PATH? does the project build?); falling back to AST-only"
+                "Error: --semantic was requested but rust-analyzer could not start for {}.\n\
+                 Is rust-analyzer on PATH (or AST_CONTEXT_RUST_ANALYZER set)? Does the project build?\n\
+                 Refusing to fall back to heuristic-only results, which are noisy — re-run without \
+                 --semantic if you want them.",
+                root.display()
             );
-            analysis::analyze(g, config)
+            process::exit(1);
         }
     }
 }
@@ -844,7 +848,11 @@ fn run_redundancy(
     semantic: bool,
 ) -> Vec<analysis::Finding> {
     if semantic {
-        eprintln!("--semantic ignored: this binary was built without the `lsp` feature");
+        eprintln!(
+            "Error: --semantic requires the `lsp` feature, which this binary was built without. \
+             Rebuild with the default features, or re-run without --semantic."
+        );
+        process::exit(1);
     }
     analysis::analyze(g, config)
 }
