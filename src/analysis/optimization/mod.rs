@@ -693,46 +693,57 @@ pub(super) fn detect_unbounded_recursion(
             continue;
         }
 
-        // Check if function calls itself
-        let self_call_patterns = [
-            format!("{}(", func.name),
-            format!("self.{}(", func.name),
-        ];
-
-        let mut calls_self = false;
-        for line in src.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with("def ")
-                || trimmed.starts_with("fn ") || trimmed.starts_with("func ")
+        // Does the function call itself?
+        let semantic_rust = ctx.semantic.is_available() && func.language == Language::Rust;
+        let calls_self = if semantic_rust {
+            // Good-faith: resolve real calls. A textual `name(` match can be a
+            // *different* function with the same name (e.g. `other.process()`);
+            // call_edges resolves method/trait dispatch, so we only count true
+            // self-recursion.
+            match super::helpers::rust_fn_name_location(func)
+                .and_then(|loc| ctx.semantic.call_edges(&loc))
             {
-                continue;
-            }
-            for pat in &self_call_patterns {
-                if trimmed.contains(pat.as_str()) {
-                    calls_self = true;
-                    break;
+                Some(edges) => {
+                    let self_canon = std::fs::canonicalize(&func.path).ok();
+                    let span = func.span.start_line as usize..=func.span.end_line as usize;
+                    edges.outgoing.iter().any(|e| {
+                        self_canon.as_deref() == Some(std::path::Path::new(&e.file))
+                            && span.contains(&e.line)
+                    })
                 }
+                None => continue, // can't resolve — don't guess in semantic mode
             }
-            if calls_self { break; }
-        }
+        } else {
+            let self_call_patterns = [format!("{}(", func.name), format!("self.{}(", func.name)];
+            src.lines().any(|line| {
+                let trimmed = line.trim();
+                if trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with("def ")
+                    || trimmed.starts_with("fn ") || trimmed.starts_with("func ")
+                {
+                    return false;
+                }
+                self_call_patterns.iter().any(|pat| trimmed.contains(pat.as_str()))
+            })
+        };
 
         if !calls_self {
             continue;
         }
 
-        // Check if any parameter name suggests a depth bound
+        // A depth/limit-style parameter suggests the recursion is bounded.
         let has_depth_param = func.args.iter().any(|arg| {
             let lower = arg.to_lowercase();
             depth_params.iter().any(|dp| lower.contains(dp))
         });
-
         if has_depth_param {
             continue;
         }
 
-        // Check if source references a depth-like variable
-        let has_depth_check = depth_params.iter().any(|dp| src.contains(dp));
-        if has_depth_check {
+        // Heuristic path only: also skip when the body mentions a depth-like
+        // token. (Noisy — it matches `n` inside `fn`/`return` — but kept for the
+        // textual path's conservatism. The call_edges path already confirmed
+        // real recursion, so it doesn't need this guard.)
+        if !semantic_rust && depth_params.iter().any(|dp| src.contains(dp)) {
             continue;
         }
 

@@ -429,7 +429,7 @@ pub(crate) fn detect_dead_code(
             // cases the CALLS graph (and the textual guard) get wrong. Fall back
             // to the heuristic only when it can't answer.
             let semantic_verdict = if ctx.semantic.is_available() && path_lower.ends_with(".rs") {
-                rust_fn_name_location(func).and_then(|loc| {
+                super::super::helpers::rust_fn_name_location(func).and_then(|loc| {
                     ctx.semantic.references(&loc).map(|refs| {
                         let external = refs.iter().filter(|r| !within_fn(r, func)).count();
                         if std::env::var_os("AST_CONTEXT_LSP_DEBUG").is_some() {
@@ -475,22 +475,6 @@ pub(crate) fn detect_dead_code(
             }
         }
     }
-}
-
-/// Source position of a Rust free function's *name* identifier — where a
-/// language server expects the cursor for a references query. The span starts at
-/// the declaration keyword (`pub`/`fn`), so locate the name after `fn ` on the
-/// declaration line.
-fn rust_fn_name_location(func: &crate::types::node::FunctionData) -> Option<Location> {
-    let content = std::fs::read_to_string(&func.path).ok()?;
-    let line = content.lines().nth(func.span.start_line.saturating_sub(1) as usize)?;
-    let after_fn = line.find("fn ")? + 3;
-    let col = line[after_fn..].find(&func.name)? + after_fn;
-    Some(Location {
-        file: func.path.to_string_lossy().into_owned(),
-        line: func.span.start_line as usize,
-        col,
-    })
 }
 
 /// Whether a reference falls inside the function's own body span (a self-

@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use super::{Location, Mutability, SemanticProvider, TypeInfo};
+use super::{CallEdges, Location, Mutability, SemanticProvider, TypeInfo};
 
 /// How long to wait for the server to finish its initial indexing before giving
 /// up and proceeding best-effort.
@@ -154,7 +154,8 @@ impl LspClient {
             "capabilities": {
                 "workspace": { "workspaceFolders": true, "configuration": true },
                 "textDocument": {
-                    "references": { "dynamicRegistration": false }
+                    "references": { "dynamicRegistration": false },
+                    "callHierarchy": { "dynamicRegistration": false }
                 },
                 "window": { "workDoneProgress": true },
                 // rust-analyzer's canonical readiness signal: it sends
@@ -279,10 +280,35 @@ impl LspClient {
     /// rust-analyzer shows on hover (e.g. ```` ```rust\nlet x: i32\n``` ````).
     fn type_of(&mut self, loc: &Location) -> io::Result<Option<TypeInfo>> {
         let text = self.hover_markdown(loc)?;
-        if std::env::var_os("AST_CONTEXT_LSP_DEBUG").is_some() {
-            eprintln!("lsp hover raw: {text:?}");
-        }
         Ok(parse_hover_type(&text).map(|name| TypeInfo { name, is_copy: None, size: None }))
+    }
+
+    /// Resolved incoming/outgoing calls for the function whose name is at `loc`,
+    /// via `callHierarchy` — which resolves method/trait dispatch and macro
+    /// expansion that the AST call graph misses. `None` if there's no callable
+    /// symbol at `loc`.
+    fn call_edges(&mut self, loc: &Location) -> io::Result<Option<CallEdges>> {
+        let path = PathBuf::from(&loc.file);
+        let uri = path_to_uri(&path);
+        self.ensure_open(&path, &uri)?;
+
+        let prep = self.request(
+            "textDocument/prepareCallHierarchy",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": loc.line.saturating_sub(1), "character": loc.col }
+            }),
+        )?;
+        let Some(item) = prep.as_array().and_then(|a| a.first()).cloned() else {
+            return Ok(None);
+        };
+
+        let incoming = self.request("callHierarchy/incomingCalls", json!({ "item": item }))?;
+        let outgoing = self.request("callHierarchy/outgoingCalls", json!({ "item": item }))?;
+        Ok(Some(CallEdges {
+            incoming: collect_call_locations(&incoming, "from"),
+            outgoing: collect_call_locations(&outgoing, "to"),
+        }))
     }
 
     /// Raw markdown of `textDocument/hover` at `loc`.
@@ -410,6 +436,37 @@ impl SemanticProvider for LspProvider {
             None
         }
     }
+
+    fn call_edges(&self, loc: &Location) -> Option<CallEdges> {
+        let mut client = self.client.lock().ok()?;
+        match client.call_edges(loc) {
+            Ok(e) => e,
+            Err(e) => {
+                if std::env::var_os("AST_CONTEXT_LSP_DEBUG").is_some() {
+                    eprintln!("lsp call_edges failed: {e}");
+                }
+                None
+            }
+        }
+    }
+}
+
+/// Collect the declaration locations of the call-hierarchy items under `key`
+/// (`"from"` for incoming, `"to"` for outgoing) — each item's `selectionRange`
+/// points at the other function's name.
+fn collect_call_locations(result: &Value, key: &str) -> Vec<Location> {
+    let Some(arr) = result.as_array() else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|entry| {
+            let item = entry.get(key)?;
+            let file = item.get("uri").and_then(Value::as_str).map(uri_to_path)?;
+            let line = item.pointer("/selectionRange/start/line").and_then(Value::as_u64)? as usize;
+            let col = item.pointer("/selectionRange/start/character").and_then(Value::as_u64)? as usize;
+            Some(Location { file, line: line + 1, col })
+        })
+        .collect()
 }
 
 /// `Copy` primitive value types. References are intentionally absent:
@@ -613,5 +670,36 @@ mod tests {
         eprintln!("type_of(name) = {str_ty:?}");
         assert_eq!(str_ty.name, "String");
         assert_eq!(provider.is_copy(&str_ty), None, "String is not a known Copy primitive");
+    }
+
+    // `walk` in dataflow.rs is recursive (it calls `walk` on each child) and is
+    // called by `UseDef::analyze`, so call_edges should report both a self-edge
+    // (outgoing pointing back at walk's own line) and a non-empty incoming set.
+    // Run with: cargo test --features lsp -- --ignored call_edges_live
+    #[test]
+    #[ignore]
+    fn call_edges_live() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let program = std::env::var("AST_CONTEXT_LSP_RA").unwrap_or_else(|_| "rust-analyzer".into());
+        let provider = LspProvider::start_with(&program, &root).expect("rust-analyzer should start");
+
+        let file = root.join("src/analysis/optimization/dataflow.rs");
+        let text = std::fs::read_to_string(&file).unwrap();
+        let (decl_line0, col) = text
+            .lines()
+            .enumerate()
+            .find_map(|(i, l)| l.find("fn walk(").map(|c| (i, c + "fn ".len())))
+            .expect("walk declaration present");
+        let decl_line = decl_line0 + 1;
+
+        let loc = Location { file: file.to_string_lossy().into_owned(), line: decl_line, col };
+        let edges = provider.call_edges(&loc).expect("call_edges answered");
+        eprintln!("walk incoming={} outgoing={}", edges.incoming.len(), edges.outgoing.len());
+
+        assert!(!edges.incoming.is_empty(), "walk has callers");
+        assert!(
+            edges.outgoing.iter().any(|e| e.file.ends_with("dataflow.rs") && e.line == decl_line),
+            "walk is recursive: outgoing should include a self-edge at its own line"
+        );
     }
 }
