@@ -265,9 +265,11 @@ impl LspClient {
     /// signature ⇒ `None`.
     fn receiver_mutability(&mut self, loc: &Location) -> io::Result<Option<Mutability>> {
         let text = self.hover_markdown(loc)?;
-        // `&mut self` is checked first: a signature like `fn f(&self, x: &mut T)`
-        // contains `&mut` but not the substring `&mut self`, so it reads Shared.
-        Ok(if text.contains("&mut self") {
+        // A mutable receiver may carry an explicit lifetime — `&mut self`,
+        // `& mut self`, or `&'cursor mut self` (e.g. tree-sitter's
+        // `QueryCursor::matches`). Match all of those, not just the literal
+        // `&mut self`, so a lifetime-annotated receiver isn't misread as Shared.
+        Ok(if has_mut_self_receiver(&text) {
             Some(Mutability::Mutable)
         } else if text.contains("self") {
             Some(Mutability::Shared)
@@ -516,6 +518,22 @@ fn broken(msg: &str) -> io::Error {
 /// URI unreserved set (path separators kept). Critical when the path contains a
 /// space or other special byte — an unencoded URI won't match the server's
 /// internal file id, and queries silently return nothing.
+/// Whether a hovered signature has a `&mut self` receiver, tolerating an
+/// explicit lifetime between the `&` and `mut` (`&'a mut self`). Distinguishes a
+/// genuine mutable-reference receiver from a by-value `mut self` binding (which
+/// has no leading `&`).
+fn has_mut_self_receiver(sig: &str) -> bool {
+    let Some(pos) = sig.find("mut self") else { return false };
+    let mut pre = sig[..pos].trim_end();
+    // Strip an optional trailing lifetime token (`'a`, `'cursor`, …).
+    if let Some(apos) = pre.rfind('\'') {
+        if pre[apos + 1..].chars().all(|c| c.is_alphanumeric() || c == '_') {
+            pre = pre[..apos].trim_end();
+        }
+    }
+    pre.ends_with('&')
+}
+
 fn path_to_uri(path: &Path) -> String {
     let abs = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let mut out = String::from("file://");
@@ -616,6 +634,20 @@ mod tests {
             Some(Mutability::Shared),
             "slice::contains takes &self"
         );
+    }
+
+    #[test]
+    fn mut_self_receiver_detection() {
+        assert!(has_mut_self_receiver("fn push(&mut self, value: T)"));
+        assert!(has_mut_self_receiver("fn f(& mut self)"));
+        // Lifetime-annotated receiver (tree-sitter QueryCursor::matches).
+        assert!(has_mut_self_receiver("fn matches<'a>(&'cursor mut self, ...)"));
+        // Shared receiver.
+        assert!(!has_mut_self_receiver("fn contains(&self, x: &T) -> bool"));
+        // By-value `mut self` binding is not a mutable *reference* receiver.
+        assert!(!has_mut_self_receiver("fn into_inner(mut self) -> T"));
+        // A `&mut T` *parameter* (not the receiver) must not count.
+        assert!(!has_mut_self_receiver("fn f(&self, buf: &mut Vec<u8>)"));
     }
 
     #[test]

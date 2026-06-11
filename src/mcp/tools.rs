@@ -163,10 +163,12 @@ pub fn list_tools() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "analyze_redundancy".to_string(),
             description: "Tiered redundancy + code-health report: passthrough wrappers, near/structural \
-                duplicates, merge/split candidates, dead code, and anti-patterns, ranked Critical>High>Medium>Low. \
+                duplicates, merge/split candidates, dead code/types, unused params, anti-patterns, ranked \
+                Critical>High>Medium>Low (within a tier, most important code first via PageRank). \
                 For dead code pass category='anti_patterns'. Scans the WHOLE repo by default — pass \
                 path='src/foo.rs' (or a dir) to scope it to one file cheaply. Tags: tiers [C]/[H]/[M]/[L]; \
-                types e.g. [PT]=passthrough [ND]=near-dup [DC]=dead-code. Needs annotate=true on index.".to_string(),
+                types e.g. [P]=passthrough [ND]=near-dup [DC]=dead-code [DT]=dead-type [UPM]=unused-param. \
+                Each result emits its own legend. Needs annotate=true on index.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -202,7 +204,7 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                     },
                     "semantic": {
                         "type": "boolean",
-                        "description": "Confirm findings with a language server (rust-analyzer) instead of syntactic heuristics — e.g. dead code is verified against real references (resolving macros, fn-pointers, trait dispatch). SLOWER: the server loads/indexes the project (which must build) on first use this session, then stays warm. Rust only; requires rust-analyzer on PATH. If the server can't start, the call returns an error rather than falling back to noisy heuristics. Default false."
+                        "description": "Confirm findings with a language server (rust-analyzer) instead of syntactic heuristics — e.g. dead code is verified against real references (resolving macros, fn-pointers, trait dispatch). ALSO enables two semantic-only checks: [VTB] a `pub` item used only within its own file (tighten visibility) and [UMR] a `&mut` parameter never used mutably (change to `&`). SLOWER: the server loads/indexes the project (which must build) on first use this session, then stays warm. Rust only; requires rust-analyzer on PATH. If the server can't start, the call returns an error rather than falling back to noisy heuristics. Default false."
                     }
                 }
             }),
@@ -610,7 +612,7 @@ fn handle_find_code(state: &SharedState, args: &serde_json::Value) -> ToolResult
     with_graph(state, repo, |graph| {
         let q = query.to_lowercase();
         // List mode (empty query + kind): enumerate all nodes of that kind.
-        let filtered: Vec<_> = if q.is_empty() {
+        let mut filtered: Vec<_> = if q.is_empty() {
             graph
                 .nodes_by_label(kind_filter.unwrap_or(""))
                 .into_iter()
@@ -621,9 +623,33 @@ fn handle_find_code(state: &SharedState, args: &serde_json::Value) -> ToolResult
                 .search_by_name(query)
                 .into_iter()
                 .filter(|(_, node)| kind_filter.is_none_or(|k| node.label() == k))
-                .take(50)
+                .take(100) // collect extra before dedup+sort
                 .collect()
         };
+
+        if !q.is_empty() {
+            // Dedup Module nodes by name — `use Foo` creates a Module node for
+            // every file that imports it, flooding results with identical entries.
+            let mut seen_module_names: HashSet<String> = HashSet::new();
+            filtered.retain(|(_, node)| {
+                if node.label() == "Module" {
+                    seen_module_names.insert(node.name().to_string())
+                } else {
+                    true
+                }
+            });
+
+            // Rank: exact name matches first, then production code before
+            // test/fixture/example hits (using the same helper used elsewhere).
+            filtered.sort_by_key(|(_, node)| {
+                let is_exact = !node.name().eq_ignore_ascii_case(query);
+                let is_secondary = is_secondary_path(&node.location().0);
+                let is_module = node.label() == "Module";
+                (is_exact, is_secondary, is_module)
+            });
+            filtered.truncate(50);
+        }
+
         let seen: HashSet<_> = filtered.iter().map(|(idx, _)| *idx).collect();
 
         // Struct/class field names and enum variant names aren't node names, so a
@@ -1382,6 +1408,10 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
             min_lines,
             skip_checks,
             category,
+            // Scope the heavy O(n²) checks to the requested path so a scoped
+            // query doesn't pay for a whole-repo scan. The post-filter below is
+            // kept as the correctness backstop for checks that don't honor scope.
+            scope_paths: path_filter.map(|p| vec![p.to_string()]),
             ..Default::default()
         };
         if let Some(v) = near_dup {
@@ -1445,16 +1475,31 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                         .unwrap_or(false)
                 })
         };
-        // Fully deterministic order: tier, then production-before-fixtures, then a
-        // stable tiebreak on the finding's (sorted) node indices. Without the
-        // tiebreak, ties fall back to checks' HashMap iteration order, which Rust
-        // randomizes per process — making output differ run to run.
+        // Within a tier, surface findings in load-bearing code first: weight by
+        // the PageRank importance of the finding's nodes (the same ranking behind
+        // the repo map). A near-duplicate in a hot, widely-called function matters
+        // more than one in a leaf helper, so it should win the limited top slots.
+        let rank = pagerank(graph);
+        let importance = |f: &analysis::Finding| -> std::cmp::Reverse<u64> {
+            let max = f
+                .node_indices
+                .iter()
+                .filter_map(|&ni| rank.get(&NodeIndex::new(ni)).copied())
+                .fold(0.0_f64, f64::max);
+            // Bucket the score into a sortable integer (Reverse ⇒ high rank first).
+            std::cmp::Reverse((max * 1e9) as u64)
+        };
+
+        // Fully deterministic order: tier, production-before-fixtures, importance,
+        // then a stable tiebreak on the finding's (sorted) node indices. Without
+        // the final tiebreak, ties fall back to checks' HashMap iteration order,
+        // which Rust randomizes per process — making output differ run to run.
         filtered.sort_by_cached_key(|f| {
             let mut idx = f.node_indices.clone();
             idx.sort_unstable();
             // description is the final tiebreak for findings with no node_indices
             // (e.g. data clumps); their descriptions are built deterministically.
-            (f.tier, is_secondary_finding(f), idx, f.description.clone())
+            (f.tier, is_secondary_finding(f), importance(f), idx, f.description.clone())
         });
 
         if limit_per_type > 0 {
@@ -1586,6 +1631,7 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                     }
                 }
 
+                const MAX_NODES_IN_LIST: usize = 8;
                 let mut nodes_info = Vec::new();
                 for &ni in &finding.node_indices {
                     let node_idx = NodeIndex::new(ni);
@@ -1599,12 +1645,17 @@ fn handle_analyze_redundancy(state: &SharedState, args: &serde_json::Value) -> T
                         } else {
                             format!("({})", path_str)
                         };
-
                         nodes_info.push(format!("{}({}){}", node.name(), node.short_label(), loc_str));
                     }
                 }
                 if !nodes_info.is_empty() {
-                    text.push_str(&format!("  └─ {}\n", nodes_info.join(", ")));
+                    let overflow = nodes_info.len().saturating_sub(MAX_NODES_IN_LIST);
+                    let shown = &nodes_info[..nodes_info.len().min(MAX_NODES_IN_LIST)];
+                    if overflow > 0 {
+                        text.push_str(&format!("  └─ {}, (+{} more)\n", shown.join(", "), overflow));
+                    } else {
+                        text.push_str(&format!("  └─ {}\n", shown.join(", ")));
+                    }
                 }
             }
             text.push('\n');
@@ -1820,6 +1871,16 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
     }
 
     with_graph(state, repo, |graph| {
+        // Cluster similar code ONCE for the whole batch. find_similar_nodes is
+        // O(n²) over annotated nodes; with None it groups within each label
+        // internally, so a single call covers every name. Previously this ran
+        // per name (up to 12× per call) — the slowest part of the hot path.
+        let similar_groups = if graph.has_annotations() {
+            graph.find_similar_nodes(None, 3)
+        } else {
+            Vec::new()
+        };
+
         let render_one = |name: &str| -> String {
         let mut filtered: Vec<(NodeIndex, &GraphNode)> = graph
             .search_by_name(name)
@@ -1939,9 +2000,11 @@ fn handle_get_context_for_symbol(state: &SharedState, args: &serde_json::Value) 
 
         // ── Similar nodes ─────────────────────────────────────────────────
         // Supplementary, not the core of "what is X" — show the count + top 5.
-        if graph.has_annotations() {
-            let groups = graph.find_similar_nodes(Some(node.label()), 3);
-            let my_group = groups.iter().find(|g| g.iter().any(|(i, _)| i == idx));
+        // Reuses the batch-wide clustering computed above (groups are by label,
+        // so filtering to this node's cluster is equivalent to the old per-label
+        // call but without re-clustering for every name).
+        if !similar_groups.is_empty() {
+            let my_group = similar_groups.iter().find(|g| g.iter().any(|(i, _)| i == idx));
             if let Some(group) = my_group {
                 let others: Vec<_> = group.iter().filter(|(i, _)| i != idx).collect();
                 if !others.is_empty() {

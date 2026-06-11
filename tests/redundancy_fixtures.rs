@@ -43,12 +43,46 @@ fn is_near_duplicate(k: &FindingKind) -> bool {
 fn is_passthrough(k: &FindingKind) -> bool {
     matches!(k, FindingKind::Passthrough { .. })
 }
+fn is_dead_code(k: &FindingKind) -> bool {
+    matches!(k, FindingKind::DeadCode { .. })
+}
+fn is_sync_async_conflict(k: &FindingKind) -> bool {
+    matches!(k, FindingKind::SyncAsyncConflict { .. })
+}
+fn is_dead_type(k: &FindingKind) -> bool {
+    matches!(k, FindingKind::DeadType { .. })
+}
+fn is_unused_parameter(k: &FindingKind) -> bool {
+    matches!(k, FindingKind::UnusedParameter { .. })
+}
+fn is_async_without_await(k: &FindingKind) -> bool {
+    matches!(k, FindingKind::AsyncWithoutAwait { .. })
+}
 
 const CASES: &[Case] = &[
     ("near_duplicate_positive", is_near_duplicate, true),
     ("near_duplicate_negative", is_near_duplicate, false),
     ("passthrough_positive", is_passthrough, true),
     ("passthrough_negative", is_passthrough, false),
+    // A `#[test]` fn with no callers is not dead code (parser captures #[test]).
+    ("dead_code_test_attr", is_dead_code, false),
+    // A `#[test]` fn that just calls one fn is not a passthrough wrapper.
+    ("passthrough_test_attr", is_passthrough, false),
+    // A blocking keyword only in a string/comment must not flag (masking), but a
+    // real blocking call in code still must.
+    ("masked_blocking_negative", is_sync_async_conflict, false),
+    ("masked_blocking_positive", is_sync_async_conflict, true),
+    // Dead types: an unreferenced plain type is flagged; a referenced type and a
+    // type with methods are not.
+    ("dead_type_positive", is_dead_type, true),
+    ("dead_type_negative", is_dead_type, false),
+    // Unused params: flagged when never used; NOT when used only in an f-string
+    // interpolation or when `_`-prefixed.
+    ("unused_param_positive", is_unused_parameter, true),
+    ("unused_param_negative", is_unused_parameter, false),
+    // async without await: flagged when it never awaits, not when it does.
+    ("async_no_await_positive", is_async_without_await, true),
+    ("async_no_await_negative", is_async_without_await, false),
 ];
 
 #[test]

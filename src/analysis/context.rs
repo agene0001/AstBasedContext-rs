@@ -1,11 +1,13 @@
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use petgraph::graph::NodeIndex;
 
 use crate::graph::structural;
 use crate::graph::CodeGraph;
 use crate::types::node::GraphNode;
-use crate::types::EdgeKind;
+use crate::types::{EdgeKind, Language};
 use super::semantic::SemanticProvider;
 use super::types::AnalysisConfig;
 
@@ -51,6 +53,24 @@ pub(crate) struct AnalysisContext<'a> {
     /// IDF weights over the function-fingerprint corpus, so ubiquitous grammar
     /// productions don't inflate structural similarity.
     pub fn_idf: HashMap<u64, f64>,
+
+    /// Per-function source with string-literal and comment bytes blanked to
+    /// spaces (newlines preserved), so keyword/substring pattern checks don't
+    /// match text that only appears inside a string or comment. Built lazily on
+    /// first [`masked_source`](Self::masked_source) call — filtered/scoped
+    /// analyses that never run a pattern check pay nothing.
+    masked_sources: OnceCell<HashMap<NodeIndex, String>>,
+
+    /// When `config.scope_paths` is set, the set of nodes whose file path
+    /// matches the scope. `None` means "no scope — everything is in scope".
+    /// Lets the heavy O(n²) checks skip pair work that can't touch the scope.
+    scope: Option<HashSet<NodeIndex>>,
+
+    /// Absolute indexed root (the `Repository` node's canonicalized path). Node
+    /// paths are stored relative to it; semantic (LSP) checks resolve them to
+    /// absolute through [`resolve_path`](Self::resolve_path) so queries don't
+    /// depend on the process working directory.
+    root: Option<PathBuf>,
 }
 
 #[allow(dead_code)]
@@ -136,6 +156,23 @@ impl<'a> AnalysisContext<'a> {
         let corpus: Vec<&structural::Fingerprint> = fn_fingerprints.values().collect();
         let fn_idf = structural::idf_weights(&corpus);
 
+        // The graph records the canonicalized absolute root; node paths are
+        // relative to it.
+        let root = graph.root.clone();
+
+        // Precompute the in-scope node set when a path scope is requested. A node
+        // is in scope if its file path contains any of the scope substrings.
+        let scope = config.scope_paths.as_ref().map(|paths| {
+            graph
+                .graph
+                .node_indices()
+                .filter(|&idx| {
+                    let p = graph.graph[idx].location().0;
+                    paths.iter().any(|s| p.contains(s.as_str()))
+                })
+                .collect::<HashSet<NodeIndex>>()
+        });
+
         Self {
             graph,
             config,
@@ -158,7 +195,55 @@ impl<'a> AnalysisContext<'a> {
             has_test,
             fn_fingerprints,
             fn_idf,
+            masked_sources: OnceCell::new(),
+            scope,
+            root,
         }
+    }
+
+    /// Resolve a (possibly root-relative) node path to an absolute path, so
+    /// language-server queries and file reads don't depend on the process CWD.
+    /// Returns the input unchanged when it's already absolute or the root is
+    /// unknown.
+    pub fn resolve_path(&self, path: &Path) -> PathBuf {
+        if path.is_absolute() {
+            return path.to_path_buf();
+        }
+        match &self.root {
+            Some(r) => r.join(path),
+            None => path.to_path_buf(),
+        }
+    }
+
+    /// Whether a path scope is active for this analysis.
+    pub fn has_scope(&self) -> bool {
+        self.scope.is_some()
+    }
+
+    /// Whether `idx` is within the active scope. Always `true` when no scope is
+    /// set, so unscoped analyses treat every node as in scope.
+    pub fn in_scope(&self, idx: NodeIndex) -> bool {
+        self.scope.as_ref().is_none_or(|s| s.contains(&idx))
+    }
+
+    /// A function's source with string-literal and comment content masked out
+    /// (replaced by spaces, newlines kept so line/column offsets are unchanged).
+    ///
+    /// Pattern checks that scan source text for keywords (`time.sleep(`,
+    /// `requests.get(`, …) should read this instead of `func.source` so a match
+    /// inside a string literal or comment doesn't produce a false positive. The
+    /// whole map is built (one tree-sitter parse per function) on the first call
+    /// and cached for the lifetime of the context. Returns `None` only when the
+    /// node has no annotated source (same as reading `func.source`).
+    ///
+    /// Do NOT use this for checks that legitimately inspect literal content
+    /// (e.g. hardcoded-endpoint / env-var detection) — they need the raw source.
+    pub fn masked_source(&self, idx: NodeIndex) -> Option<&str> {
+        let functions = &self.functions;
+        self.masked_sources
+            .get_or_init(|| build_masked_map(functions))
+            .get(&idx)
+            .map(|s| s.as_str())
     }
 
     /// IDF-weighted structural (AST-shape) cosine similarity between two function
@@ -246,4 +331,77 @@ impl<'a> AnalysisContext<'a> {
     pub fn has_test_coverage(&self, idx: NodeIndex) -> bool {
         self.has_test.contains(&idx)
     }
+}
+
+/// Build the masked-source map for every function node that has annotated
+/// source. One tree-sitter parser is created per language and reused across all
+/// that language's functions.
+fn build_masked_map(functions: &[(NodeIndex, &GraphNode)]) -> HashMap<NodeIndex, String> {
+    let mut parsers: HashMap<Language, Option<tree_sitter::Parser>> = HashMap::new();
+    let mut out = HashMap::new();
+    for &(idx, node) in functions {
+        let func = match node {
+            GraphNode::Function(f) => f,
+            _ => continue,
+        };
+        let src = match &func.source {
+            Some(s) => s,
+            None => continue,
+        };
+        let lang = func.language;
+        let parser = parsers
+            .entry(lang)
+            .or_insert_with(|| structural::parser_for(lang));
+        let masked = match parser {
+            Some(p) => mask_strings_and_comments(p, src),
+            // No grammar available — leave the source unchanged.
+            None => src.clone(),
+        };
+        out.insert(idx, masked);
+    }
+    out
+}
+
+/// Replace the bytes of every string-literal and comment node in `source` with
+/// spaces (newlines preserved), so the result has identical length and line
+/// structure but no keyword text hiding inside strings/comments. Returns the
+/// source unchanged if it can't be parsed.
+fn mask_strings_and_comments(parser: &mut tree_sitter::Parser, source: &str) -> String {
+    let tree = match parser.parse(source.as_bytes(), None) {
+        Some(t) => t,
+        None => return source.to_string(),
+    };
+    let mut bytes = source.as_bytes().to_vec();
+    let mut stack = vec![tree.root_node()];
+    while let Some(n) = stack.pop() {
+        if is_masked_kind(n.kind()) {
+            // Blank the whole node span; don't recurse (an interpolation's
+            // embedded code is rare and masking it errs toward precision).
+            for b in &mut bytes[n.byte_range()] {
+                if *b != b'\n' {
+                    *b = b' ';
+                }
+            }
+            continue;
+        }
+        let mut c = n.walk();
+        for child in n.children(&mut c) {
+            stack.push(child);
+        }
+    }
+    // Spaces and preserved newlines are all single-byte, so the result is still
+    // valid UTF-8; fall back to the original on the (impossible) error path.
+    String::from_utf8(bytes).unwrap_or_else(|_| source.to_string())
+}
+
+/// Whether a tree-sitter node kind denotes a string literal, comment, char
+/// literal, or heredoc across the supported grammars (kinds vary by language:
+/// `string`, `string_literal`, `interpreted_string_literal`, `line_comment`,
+/// `block_comment`, `character_literal`, `heredoc_body`, …).
+fn is_masked_kind(kind: &str) -> bool {
+    kind.contains("string")
+        || kind.contains("comment")
+        || kind.contains("char_literal")
+        || kind.contains("character")
+        || kind.contains("heredoc")
 }

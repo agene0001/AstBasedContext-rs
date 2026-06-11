@@ -1,11 +1,12 @@
 use crate::types::EdgeKind;
 use crate::types::node::GraphNode;
+use crate::types::Language;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use super::super::context::AnalysisContext;
-use super::super::helpers::p_min_len;
-use super::super::semantic::Location;
+use super::super::helpers::{p_min_len, rust_name_location, rust_param_location};
+use super::super::semantic::{Location, Mutability};
 use super::super::types::{Tier, FindingKind, Finding};
 use petgraph::Direction;
 use std::path::Path;
@@ -171,17 +172,45 @@ pub(crate) fn detect_circular_dependencies(
 
         let tier = if scc.len() <= 3 { Tier::High } else { Tier::Medium };
 
+        // Cap the inline name list so very large SCCs don't blow up token budgets.
+        const MAX_NAMES_IN_DESC: usize = 8;
+        let desc_names = if cycle_names.len() > MAX_NAMES_IN_DESC {
+            format!(
+                "{} … (+{} more)",
+                cycle_names[..MAX_NAMES_IN_DESC].join(", "),
+                cycle_names.len() - MAX_NAMES_IN_DESC,
+            )
+        } else {
+            cycle_names.join(" → ")
+        };
+
+        // A small cycle is a concrete A→B→A knot you break by moving one edge; a
+        // large SCC is an entangled module cluster (often just the call graph of
+        // a cohesive subsystem) where "extract shared logic" is the wrong frame.
+        const LARGE_SCC: usize = 10;
+        let description = if scc.len() > LARGE_SCC {
+            format!(
+                "Mutually-dependent module cluster: {} files form one cycle [{}] — \
+                 these files can't be built/understood in isolation; consider \
+                 layering them behind a clear interface.",
+                scc.len(),
+                desc_names,
+            )
+        } else {
+            format!(
+                "Circular dep: {} files [{}] — extract shared logic to break cycle.",
+                scc.len(),
+                desc_names,
+            )
+        };
+
         findings.push(Finding {
             tier,
             kind: FindingKind::CircularDependency {
                 cycle: cycle_names.clone(),
             },
             node_indices: cycle_node_indices,
-            description: format!(
-                "Circular dep: {} files [{}] — extract shared logic to break cycle.",
-                scc.len(),
-                cycle_names.join(" → "),
-            ),
+            description,
         });
     }
 }
@@ -366,17 +395,28 @@ pub(crate) fn detect_dead_code(
     // The call graph misses calls inside macros (format!/println!), functions
     // passed by value (.map(f), `f as ptr`), and dynamic dispatch — so CALLS edges
     // alone produce many false "dead code" reports. Guard with a textual reference
-    // check: record, per identifier, which functions' bodies mention it; a function
-    // is only "dead" if NO OTHER function references its name. Precision over recall.
+    // check: record, per identifier, which nodes' bodies mention it; a symbol is
+    // only "dead" if NO OTHER node references its name. Precision over recall.
+    //
+    // The corpus spans functions AND type definitions (struct/class/enum/trait/
+    // interface) so that a type used only as a field type, base, or annotation in
+    // another definition still counts as referenced — required for dead-type
+    // detection below, and a (welcome) extra guard for dead functions too.
     let mut referenced_in: HashMap<&str, Vec<NodeIndex>> = HashMap::new();
-    for &(fidx, fnode) in &ctx.functions {
-        if let GraphNode::Function(f) = fnode {
-            if let Some(src) = &f.source {
-                let mut seen: HashSet<&str> = HashSet::new();
-                for tok in src.split(|c: char| !c.is_alphanumeric() && c != '_') {
-                    if tok.len() >= 2 && seen.insert(tok) {
-                        referenced_in.entry(tok).or_default().push(fidx);
-                    }
+    let sourced_nodes = ctx
+        .functions
+        .iter()
+        .chain(&ctx.structs)
+        .chain(&ctx.classes)
+        .chain(&ctx.enums)
+        .chain(&ctx.traits)
+        .chain(&ctx.interfaces);
+    for &(nidx, node) in sourced_nodes {
+        if let Some(src) = node.source_snippet() {
+            let mut seen: HashSet<&str> = HashSet::new();
+            for tok in src.split(|c: char| !c.is_alphanumeric() && c != '_') {
+                if tok.len() >= 2 && seen.insert(tok) {
+                    referenced_in.entry(tok).or_default().push(nidx);
                 }
             }
         }
@@ -429,9 +469,10 @@ pub(crate) fn detect_dead_code(
             // cases the CALLS graph (and the textual guard) get wrong. Fall back
             // to the heuristic only when it can't answer.
             let semantic_verdict = if ctx.semantic.is_available() && path_lower.ends_with(".rs") {
-                super::super::helpers::rust_fn_name_location(func).and_then(|loc| {
+                let abs = ctx.resolve_path(&func.path);
+                rust_name_location(&abs, func.span.start_line, &func.name).and_then(|loc| {
                     ctx.semantic.references(&loc).map(|refs| {
-                        let external = refs.iter().filter(|r| !within_fn(r, func)).count();
+                        let external = refs.iter().filter(|r| !within_fn(&abs, r, func)).count();
                         if std::env::var_os("AST_CONTEXT_LSP_DEBUG").is_some() {
                             eprintln!(
                                 "dead-code semantic: {} -> {} refs ({} external)",
@@ -475,16 +516,625 @@ pub(crate) fn detect_dead_code(
             }
         }
     }
+
+    detect_dead_types(ctx, &referenced_in, findings);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Check 29b: Dead types (struct / enum / trait / interface / class)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Flag type definitions that nothing references. Deliberately conservative —
+/// precision over recall — so it only fires on the high-confidence case: a plain
+/// data type with no methods, no implementors/subclasses, and no textual use
+/// anywhere in the corpus. Types *with* behaviour (an impl/methods) are left to
+/// the call-graph checks, since verifying them needs method-level reachability.
+fn detect_dead_types(
+    ctx: &AnalysisContext,
+    referenced_in: &HashMap<&str, Vec<NodeIndex>>,
+    findings: &mut Vec<Finding>,
+) {
+    // Type names that have at least one method — skip these (see doc comment).
+    let types_with_methods: HashSet<&str> = ctx
+        .functions
+        .iter()
+        .filter_map(|&(_, n)| match n {
+            GraphNode::Function(f) => f.class_context.as_deref(),
+            _ => None,
+        })
+        .collect();
+
+    let type_nodes = ctx
+        .structs
+        .iter()
+        .chain(&ctx.enums)
+        .chain(&ctx.traits)
+        .chain(&ctx.interfaces)
+        .chain(&ctx.classes);
+
+    for &(idx, node) in type_nodes {
+        let name = node.name();
+        if name.len() < 2 || types_with_methods.contains(name) {
+            continue;
+        }
+
+        // Skip test/fixture/example/generated files.
+        let path = node.location().0;
+        let path_lower = path.to_lowercase();
+        if path_lower.split('/').any(|seg| {
+            matches!(seg, "tests" | "test" | "examples" | "fixtures" | "grammars")
+                || seg.starts_with("test_project")
+        }) || path_lower.ends_with("_test.rs")
+            || path_lower.contains("fixture")
+        {
+            continue;
+        }
+
+        // Used via the graph: implemented (trait/interface) or inherited (base).
+        if ctx.implementors.get(&idx).is_some_and(|v| !v.is_empty())
+            || ctx.subclasses.get(&idx).is_some_and(|v| !v.is_empty())
+        {
+            continue;
+        }
+
+        // Used textually anywhere other than its own definition.
+        let referenced_elsewhere = referenced_in
+            .get(name)
+            .is_some_and(|v| v.iter().any(|&i| i != idx));
+        if referenced_elsewhere {
+            continue;
+        }
+
+        let kind = node.short_label();
+        findings.push(Finding {
+            // High, not Critical: an unused `pub` type may be a deliberate public
+            // API surface rather than truly dead, and types carry no visibility
+            // info here to tell the two apart.
+            tier: Tier::High,
+            kind: FindingKind::DeadType {
+                name: name.to_string(),
+                type_kind: kind.to_string(),
+                file_path: path.clone(),
+            },
+            node_indices: vec![idx.index()],
+            description: format!(
+                "{} `{}` in {} is never referenced — likely dead (or unused public API).",
+                kind,
+                name,
+                Path::new(&path).file_name().unwrap_or_default().to_string_lossy(),
+            ),
+        });
+    }
 }
 
 /// Whether a reference falls inside the function's own body span (a self-
 /// reference such as recursion) rather than counting as an external use.
-fn within_fn(r: &Location, func: &crate::types::node::FunctionData) -> bool {
-    let same_file = std::fs::canonicalize(&func.path)
+/// `abs_path` is the function's absolute file path (resolved against the root).
+fn within_fn(abs_path: &Path, r: &Location, func: &crate::types::node::FunctionData) -> bool {
+    let same_file = std::fs::canonicalize(abs_path)
         .map(|p| Path::new(&r.file) == p)
-        .unwrap_or(false);
+        .unwrap_or_else(|_| Path::new(&r.file) == abs_path);
     same_file
         && (func.span.start_line as usize..=func.span.end_line as usize).contains(&r.line)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Check 29c: Unused parameter
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Extract the bare identifier from a parameter spec, or `None` if it isn't a
+/// plain named parameter (e.g. `self`, `*args`, a destructuring pattern). Strips
+/// Rust binding modifiers (`mut`, `&`, `&mut`), the type annotation (`: T`), and
+/// any default (`= v`).
+fn bare_param_name(raw: &str) -> Option<&str> {
+    let s = raw.trim();
+    // Take the part before a type annotation or default value.
+    let s = s.split(':').next().unwrap_or(s);
+    let s = s.split('=').next().unwrap_or(s).trim();
+    // Strip Rust binding prefixes.
+    let s = s
+        .trim_start_matches("&mut ")
+        .trim_start_matches("&")
+        .trim_start_matches("mut ")
+        .trim();
+    if s.is_empty() {
+        return None;
+    }
+    // Must be a single plain identifier (rules out `*args`, `(a, b)`, `...rest`).
+    if s.chars().all(|c| c.is_alphanumeric() || c == '_')
+        && s.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
+    {
+        Some(s)
+    } else {
+        None
+    }
+}
+
+/// Whether a parameter name is one we never report (receiver/conventionally
+/// ignored params).
+fn is_ignorable_param(name: &str) -> bool {
+    name.starts_with('_') || matches!(name, "self" | "cls" | "this")
+}
+
+/// Whether a function's stored source snippet was truncated (the annotate layer
+/// caps snippets at ~4 KB). On a truncated body we can't see all uses, so usage-
+/// based checks (unused param, async-without-await) must bail to avoid false
+/// positives where the real use lives past the cut.
+fn source_truncated(func: &crate::types::node::FunctionData, src: &str) -> bool {
+    let span_lines =
+        (func.span.end_line as usize).saturating_sub(func.span.start_line as usize) + 1;
+    span_lines > src.lines().count()
+}
+
+/// Whether the function's signature is mandated by something external (a trait,
+/// interface, base class, or override), so an "unused" param isn't the author's
+/// to remove. Conservative: only inherent (non-overriding) methods and free
+/// functions are eligible.
+fn signature_is_mandated(func: &crate::types::node::FunctionData) -> bool {
+    if func.is_abstract {
+        return true;
+    }
+    if func
+        .decorators
+        .iter()
+        .any(|d| d.contains("override") || d.contains("overload"))
+    {
+        return true;
+    }
+    if let Some(cc) = &func.class_context {
+        // In dynamic languages a method may silently override a base; we can't
+        // tell, so don't flag method params there at all.
+        if func.language != Language::Rust {
+            return true;
+        }
+        // Rust `impl Trait for Type`: the trait dictates the signature. Inherent
+        // `impl Type` sets context == the type name, so context != class_context
+        // marks a trait impl.
+        if func.context_type.as_deref() == Some("impl_item")
+            && func.context.as_deref() != Some(cc.as_str())
+        {
+            return true;
+        }
+    }
+    false
+}
+
+pub(crate) fn detect_unused_parameters(
+    ctx: &AnalysisContext,
+    findings: &mut Vec<Finding>,
+) {
+    for &(idx, node) in &ctx.functions {
+        let func = match node {
+            GraphNode::Function(f) => f,
+            _ => continue,
+        };
+
+        if signature_is_mandated(func) {
+            continue;
+        }
+
+        // Use the RAW body, not the masked one: a parameter used only inside a
+        // string interpolation (e.g. a Python f-string `f"{x}"`) is genuinely
+        // used, but masking blanks interpolations — reading raw keeps us from
+        // false-flagging those. The cost (a param named in a plain string/comment
+        // counts as "used") only lowers recall, which is the safe direction.
+        let src = match &func.source {
+            Some(s) => s.as_str(),
+            None => continue,
+        };
+
+        // A truncated snippet can't prove a param is unused — its use may be past
+        // the 4 KB cut.
+        if source_truncated(func, src) {
+            continue;
+        }
+
+        // Only functions with an actual body — skip bare declarations, where
+        // every param is trivially "unused".
+        let has_body = src.contains('{')
+            || matches!(func.language, Language::Python | Language::Ruby);
+        if !has_body {
+            continue;
+        }
+
+        // Count whole-token occurrences of each identifier across the body. A
+        // param that occurs once (its own declaration) and nowhere else is unused.
+        let mut token_counts: HashMap<&str, u32> = HashMap::new();
+        for tok in src.split(|c: char| !c.is_alphanumeric() && c != '_') {
+            if !tok.is_empty() {
+                *token_counts.entry(tok).or_insert(0) += 1;
+            }
+        }
+
+        for raw in &func.args {
+            let name = match bare_param_name(raw) {
+                Some(n) if !is_ignorable_param(n) => n,
+                _ => continue,
+            };
+            // <=1 ⇒ appears only in the signature.
+            if token_counts.get(name).copied().unwrap_or(0) <= 1 {
+                findings.push(Finding {
+                    tier: Tier::Low,
+                    kind: FindingKind::UnusedParameter {
+                        function_name: func.name.clone(),
+                        param_name: name.to_string(),
+                    },
+                    node_indices: vec![idx.index()],
+                    description: format!(
+                        "`{}`: parameter `{}` is never used — remove it or prefix `_{}`.",
+                        func.name, name, name,
+                    ),
+                });
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Check 29d: async function that never awaits
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(crate) fn detect_async_without_await(
+    ctx: &AnalysisContext,
+    findings: &mut Vec<Finding>,
+) {
+    for &(idx, node) in &ctx.functions {
+        let func = match node {
+            GraphNode::Function(f) => f,
+            _ => continue,
+        };
+
+        let src = match ctx.masked_source(idx) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        // A truncated snippet may hide the `.await` past the 4 KB cut.
+        if let GraphNode::Function(f) = node {
+            if source_truncated(f, src) {
+                continue;
+            }
+        }
+
+        // Identify async functions. Rust's parser sets is_async reliably; other
+        // languages are detected from the (masked) signature line.
+        let is_async = if func.language == Language::Rust {
+            func.is_async
+        } else {
+            func.is_async
+                || src.lines().next().is_some_and(|l| {
+                    let t = l.trim_start();
+                    t.starts_with("async ") || t.contains("async def ")
+                })
+        };
+        if !is_async {
+            continue;
+        }
+
+        // Need a real body to judge — skip async trait/interface declarations.
+        let has_body = src.contains('{')
+            || matches!(func.language, Language::Python | Language::Ruby);
+        if !has_body || signature_is_mandated(func) {
+            continue;
+        }
+
+        // `await` as a whole token anywhere in the (masked) body means it does
+        // await. Substring is fine here: `.await`, `await x`, `await(` all contain
+        // it, and string/comment occurrences are already blanked by masking.
+        // Also treat the future-combinator macros as awaiting — `select!`/`join!`
+        // drive futures to completion without a literal `.await`.
+        let drives_futures = src.contains("await")
+            || src.contains("select!")
+            || src.contains("join!")
+            || src.contains("try_join");
+        if drives_futures {
+            continue;
+        }
+
+        findings.push(Finding {
+            tier: Tier::Medium,
+            kind: FindingKind::AsyncWithoutAwait {
+                function_name: func.name.clone(),
+            },
+            node_indices: vec![idx.index()],
+            description: format!(
+                "`{}` is `async` but never awaits — make it a normal function unless it must return a future.",
+                func.name,
+            ),
+        });
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Check 29e: Over-broad visibility (semantic / LSP-backed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Whether a path is a test/fixture/example/generated location we don't report.
+fn in_secondary_path(path: &str) -> bool {
+    let p = path.to_lowercase();
+    p.split('/').any(|seg| {
+        matches!(seg, "tests" | "test" | "examples" | "fixtures" | "grammars")
+            || seg.starts_with("test_project")
+    }) || p.ends_with("_test.rs")
+        || p.contains("fixture")
+}
+
+/// Whether the declaration is bare `pub` (fully public) — not `pub(crate)`,
+/// `pub(super)`, or private. Reads the first real line of the source snippet.
+fn is_bare_pub_rust(src: &str) -> bool {
+    let head = src
+        .lines()
+        .map(str::trim_start)
+        .find(|t| !t.is_empty() && !t.starts_with("//") && !t.starts_with("#[") && !t.starts_with("/*"))
+        .unwrap_or("");
+    head.starts_with("pub ") // "pub(crate)" etc. start with "pub(" and are excluded
+}
+
+/// Same underlying file, comparing canonicalized paths (rust-analyzer returns
+/// absolute paths; our nodes may hold relative ones).
+fn same_file(a: &str, b: &str) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(pa), Ok(pb)) => pa == pb,
+        _ => a == b,
+    }
+}
+
+/// Build an over-exposed-visibility finding if every reference to the symbol at
+/// `loc` lives in its own defining file. Returns `None` when the server can't
+/// answer, when there are no references (dead, or external-only API — not our
+/// call), or when any reference is in another file (the `pub` is justified).
+fn over_exposed_finding(
+    ctx: &AnalysisContext,
+    loc: &Location,
+    def_file: &str,
+    name: &str,
+    symbol_kind: &str,
+    idx: NodeIndex,
+) -> Option<Finding> {
+    let refs = ctx.semantic.references(loc)?;
+    if refs.is_empty() {
+        return None;
+    }
+    if !refs.iter().all(|r| same_file(&r.file, def_file)) {
+        return None;
+    }
+    Some(Finding {
+        tier: Tier::Low,
+        kind: FindingKind::VisibilityTooBroad {
+            name: name.to_string(),
+            symbol_kind: symbol_kind.to_string(),
+        },
+        node_indices: vec![idx.index()],
+        description: format!(
+            "`pub` {symbol_kind} `{name}` is only used within its own file — reduce its \
+             visibility (private or `pub(crate)`) unless it's intentional public API.",
+        ),
+    })
+}
+
+pub(crate) fn detect_overexposed_visibility(
+    ctx: &AnalysisContext,
+    findings: &mut Vec<Finding>,
+) {
+    // Semantic-only: without resolved references we can't tell file-local use
+    // from genuine cross-module use, and would over-report.
+    if !ctx.semantic.is_available() {
+        return;
+    }
+
+    for &(idx, node) in &ctx.functions {
+        let GraphNode::Function(f) = node else { continue };
+        if f.language != Language::Rust || in_secondary_path(&f.path.to_string_lossy()) {
+            continue;
+        }
+        let Some(src) = &f.source else { continue };
+        if !is_bare_pub_rust(src) {
+            continue;
+        }
+        // Skip methods — an inherent/trait method's `pub` interacts with the
+        // type's own visibility and trait rules; keep this to free items + types.
+        if f.class_context.is_some() {
+            continue;
+        }
+        let abs = ctx.resolve_path(&f.path);
+        let def = abs.to_string_lossy().into_owned();
+        if let Some(loc) = rust_name_location(&abs, f.span.start_line, &f.name) {
+            if let Some(finding) = over_exposed_finding(ctx, &loc, &def, &f.name, "function", idx) {
+                findings.push(finding);
+            }
+        }
+    }
+
+    let type_nodes = ctx
+        .structs
+        .iter()
+        .chain(&ctx.enums)
+        .chain(&ctx.traits)
+        .chain(&ctx.interfaces);
+    for &(idx, node) in type_nodes {
+        let Some(src) = node.source_snippet() else { continue };
+        if !is_bare_pub_rust(src) {
+            continue;
+        }
+        let (path, start, _) = node.location();
+        if in_secondary_path(&path) {
+            continue;
+        }
+        let abs = ctx.resolve_path(Path::new(&path));
+        let def = abs.to_string_lossy().into_owned();
+        let name = node.name();
+        let kind = node.short_label();
+        if let Some(loc) = rust_name_location(&abs, start as u32, name) {
+            if let Some(finding) = over_exposed_finding(ctx, &loc, &def, name, kind, idx) {
+                findings.push(finding);
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Check 29f: `&mut` parameter never used mutably (semantic / LSP-backed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// How a single use of a parameter affects it.
+enum ParamUse {
+    /// Provably non-mutating (read, shared borrow, `&self` method, field read).
+    Read,
+    /// Provably mutating (assignment, `&mut` borrow, `&mut self` method, field set).
+    Mutates,
+    /// Can't classify with certainty (bare arg that may reborrow, macro, chain).
+    Unknown,
+}
+
+/// Classify one reference to `param` on `line`. `r.col` is the byte column of the
+/// parameter identifier. Anything ambiguous returns `Unknown` so the caller bails
+/// rather than guessing — we never want to wrongly claim a `&mut` is unnecessary.
+fn classify_param_use(ctx: &AnalysisContext, line: &str, r: &Location, param: &str) -> ParamUse {
+    let col = r.col;
+    if line.get(col..col + param.len()) != Some(param) {
+        return ParamUse::Unknown;
+    }
+    // `&mut param` — mutable borrow.
+    if line[..col].trim_end().ends_with("&mut") {
+        return ParamUse::Mutates;
+    }
+    let b = line.as_bytes();
+    let mut i = col + param.len();
+    while i < b.len() && b[i] == b' ' {
+        i += 1;
+    }
+    if i >= b.len() {
+        return ParamUse::Read; // trailing use in an expression
+    }
+    match b[i] {
+        b'.' => {
+            // Member access: `param.member ...`
+            let mut j = i + 1;
+            while j < b.len() && b[j] == b' ' {
+                j += 1;
+            }
+            let mstart = j;
+            while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+                j += 1;
+            }
+            if j == mstart {
+                return ParamUse::Unknown;
+            }
+            let member = &line[mstart..j];
+            if member == "await" {
+                return ParamUse::Read;
+            }
+            let mut k = j;
+            while k < b.len() && b[k] == b' ' {
+                k += 1;
+            }
+            match b.get(k) {
+                Some(b'(') => {
+                    // Method call — ask the server whether the receiver is `&mut self`.
+                    let mloc = Location { file: r.file.clone(), line: r.line, col: mstart };
+                    match ctx.semantic.receiver_mutability(&mloc) {
+                        Some(Mutability::Mutable) => ParamUse::Mutates,
+                        Some(Mutability::Shared) => ParamUse::Read,
+                        None => ParamUse::Unknown,
+                    }
+                }
+                // `param.field = ...` (but not `==`)
+                Some(b'=') if b.get(k + 1) != Some(&b'=') => ParamUse::Mutates,
+                // `param.a.b...` — a deeper chain may mutate via an inner method.
+                Some(b'.') => ParamUse::Unknown,
+                _ => ParamUse::Read, // field read
+            }
+        }
+        // `param = ...` (assignment, not `==`)
+        b'=' if b.get(i + 1) != Some(&b'=') => ParamUse::Mutates,
+        // compound assignment `+= -= *= /= %= ^=`
+        b'+' | b'-' | b'*' | b'/' | b'%' | b'^' if b.get(i + 1) == Some(&b'=') => ParamUse::Mutates,
+        // bare argument position — may be a `&mut` reborrow into a callee whose
+        // signature we don't resolve here; don't guess.
+        b',' | b')' => ParamUse::Unknown,
+        _ => ParamUse::Read,
+    }
+}
+
+/// `Some(true)` if every use of `param` is non-mutating, `Some(false)` if any use
+/// mutates it, `None` if any use is unclassifiable or there are no uses (an
+/// entirely-unused param is the unused-parameter check's job, not ours).
+fn param_never_mutated(
+    ctx: &AnalysisContext,
+    file: &Path,
+    param: &str,
+    refs: &[Location],
+) -> Option<bool> {
+    let content = std::fs::read_to_string(file).ok()?;
+    let lines: Vec<&str> = content.lines().collect();
+    let mut saw_use = false;
+    for r in refs {
+        if !same_file(&r.file, &file.to_string_lossy()) {
+            return None; // a local param ref outside its file shouldn't happen — bail
+        }
+        let line = lines.get(r.line.saturating_sub(1))?;
+        match classify_param_use(ctx, line, r, param) {
+            ParamUse::Read => saw_use = true,
+            ParamUse::Mutates => return Some(false),
+            ParamUse::Unknown => return None,
+        }
+    }
+    if saw_use {
+        Some(true)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn detect_unnecessary_mut_ref(
+    ctx: &AnalysisContext,
+    findings: &mut Vec<Finding>,
+) {
+    if !ctx.semantic.is_available() {
+        return;
+    }
+    for &(idx, node) in &ctx.functions {
+        let GraphNode::Function(f) = node else { continue };
+        if f.language != Language::Rust || in_secondary_path(&f.path.to_string_lossy()) {
+            continue;
+        }
+        // A trait-mandated signature isn't the author's to change.
+        if signature_is_mandated(f) {
+            continue;
+        }
+        let Some(src) = &f.source else { continue };
+        if source_truncated(f, src) {
+            continue;
+        }
+        let abs = ctx.resolve_path(&f.path);
+
+        for (i, name) in f.args.iter().enumerate() {
+            let is_mut_ref = f
+                .arg_types
+                .get(i)
+                .and_then(|t| t.as_deref())
+                .is_some_and(|t| t.trim_start().starts_with("&mut "));
+            if !is_mut_ref || name == "self" {
+                continue;
+            }
+            let Some(ploc) = rust_param_location(&abs, f.span.start_line, name) else { continue };
+            let Some(refs) = ctx.semantic.references(&ploc) else { continue };
+            if param_never_mutated(ctx, &abs, name, &refs) == Some(true) {
+                findings.push(Finding {
+                    tier: Tier::Medium,
+                    kind: FindingKind::UnnecessaryMutRef {
+                        function_name: f.name.clone(),
+                        param_name: name.clone(),
+                    },
+                    node_indices: vec![idx.index()],
+                    description: format!(
+                        "`{}`: parameter `{}` is `&mut` but never used mutably — change it to `&`.",
+                        f.name, name,
+                    ),
+                });
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

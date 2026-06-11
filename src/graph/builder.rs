@@ -741,6 +741,10 @@ impl GraphBuilder {
             }
         }
 
+        // Record the canonicalized absolute root so semantic checks can resolve
+        // the relative node paths back to absolute, CWD-independently.
+        graph.root = Some(root_path.clone());
+
         // Pre-compute structural AST fingerprints once (annotated graphs only),
         // so similarity queries don't re-parse snippets on every call.
         if annotate_sources {

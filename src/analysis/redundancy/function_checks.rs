@@ -24,6 +24,27 @@ pub(crate) fn find_passthroughs(
             _ => continue,
         };
 
+        // Skip test/fixture files — test helpers that call other test helpers
+        // are not passthrough wrappers worth reporting.
+        let path_lower = func.path.to_string_lossy().to_lowercase();
+        if path_lower.split('/').any(|seg| {
+            matches!(seg, "tests" | "test" | "examples" | "fixtures" | "grammars")
+                || seg.starts_with("test_project")
+        }) || path_lower.ends_with("_test.rs")
+            || path_lower.contains("fixture")
+        {
+            continue;
+        }
+
+        // Skip test functions by name or decorator.
+        let lower = func.name.to_lowercase();
+        if lower.starts_with("test")
+            || lower.starts_with("__")
+            || func.decorators.iter().any(|d| d.contains("test") || d.contains("fixture"))
+        {
+            continue;
+        }
+
         let src = match &func.source {
             Some(s) => s,
             None => continue,
@@ -226,6 +247,14 @@ pub(crate) fn find_near_duplicates(
         })
         .collect();
 
+    // Path scope: order in-scope candidates first so each anchors its complete
+    // group (it compares against everything), then skip pairs that touch the
+    // scope through neither endpoint. Unscoped runs leave order/work unchanged.
+    let mut annotated = annotated;
+    if ctx.has_scope() {
+        annotated.sort_by_key(|t| !ctx.in_scope(t.0));
+    }
+
     let mut used = vec![false; annotated.len()];
 
     for i in 0..annotated.len() {
@@ -236,6 +265,11 @@ pub(crate) fn find_near_duplicates(
 
         for j in (i + 1)..annotated.len() {
             if used[j] {
+                continue;
+            }
+            // Out-of-scope-only pair: it can't produce a kept finding, so skip
+            // the expensive similarity work entirely.
+            if ctx.has_scope() && !ctx.in_scope(annotated[i].0) && !ctx.in_scope(annotated[j].0) {
                 continue;
             }
             let line_ratio = annotated[i].4.min(annotated[j].4) as f64
@@ -273,6 +307,18 @@ pub(crate) fn find_near_duplicates(
                 Tier::High
             };
 
+            // Compact the name list: if all N copies share the same name, say
+            // "N copies of `name`" instead of repeating it N times.
+            let unique_names: Vec<&str> = {
+                let mut seen = HashSet::new();
+                names.iter().map(|s| s.as_str()).filter(|&s| seen.insert(s)).collect()
+            };
+            let name_str = if unique_names.len() == 1 && names.len() > 1 {
+                format!("{} copies of `{}`", names.len(), unique_names[0])
+            } else {
+                names.join(", ")
+            };
+
             findings.push(Finding {
                 tier,
                 kind: FindingKind::NearDuplicate {
@@ -282,7 +328,7 @@ pub(crate) fn find_near_duplicates(
                 node_indices: indices,
                 description: format!(
                     "near-duplicate ({:.0}%): {} — likely cosmetic differences only",
-                    sim * 100.0, names.join(", "),
+                    sim * 100.0, name_str,
                 ),
             });
         }
@@ -310,6 +356,14 @@ pub(crate) fn find_structural_similar(
         })
         .collect();
 
+    // Path scope: in-scope candidates first (each anchors its full group), then
+    // skip pairs that touch the scope through neither endpoint. See
+    // `find_near_duplicates` for the rationale. Unscoped runs are unchanged.
+    let mut annotated = annotated;
+    if ctx.has_scope() {
+        annotated.sort_by_key(|t| !ctx.in_scope(t.0));
+    }
+
     let mut used = vec![false; annotated.len()];
 
     for i in 0..annotated.len() {
@@ -320,6 +374,9 @@ pub(crate) fn find_structural_similar(
 
         for j in (i + 1)..annotated.len() {
             if used[j] {
+                continue;
+            }
+            if ctx.has_scope() && !ctx.in_scope(annotated[i].0) && !ctx.in_scope(annotated[j].0) {
                 continue;
             }
             let line_ratio = annotated[i].3.min(annotated[j].3) as f64

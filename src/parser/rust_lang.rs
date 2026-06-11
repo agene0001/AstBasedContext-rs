@@ -190,6 +190,11 @@ impl RustParser {
                 // Scan for TODO/FIXME/HACK/XXX markers in comments inside this function
                 let todo_comments = collect_todo_comments(&func_node, source);
 
+                // Collect `#[attr]` items immediately preceding this function.
+                // In the Rust grammar, attributes are sibling nodes before function_item,
+                // not children of it — so we walk backwards through the parent's children.
+                let decorators = collect_preceding_attributes(&func_node, source);
+
                 functions.push(FunctionData {
                     name,
                     path: path.to_path_buf(),
@@ -207,7 +212,7 @@ impl RustParser {
                     is_async,
                     todo_comments,
                     cyclomatic_complexity: complexity,
-                    decorators: Vec::new(), // Rust uses attributes, not decorators
+                    decorators,
                     context: ctx.as_ref().map(|(n, _, _)| n.clone()),
                     context_type: ctx.as_ref().map(|(_, t, _)| t.clone()),
                     class_context: class_ctx,
@@ -733,6 +738,40 @@ fn collect_todo_comments(node: &Node, source: &[u8]) -> Vec<String> {
 }
 
 /// Count comment nodes (line_comment and block_comment) in the tree.
+/// Collect `#[attr]` attribute items that immediately precede `func_node`
+/// among its parent's children. In the Rust grammar, attributes are sibling
+/// nodes (`attribute_item`) that appear before the `function_item` — they are
+/// not children of it.  We walk backwards from the function's position and
+/// collect contiguous attribute siblings, stopping at any other node kind.
+fn collect_preceding_attributes(func_node: &Node, source: &[u8]) -> Vec<String> {
+    let parent = match func_node.parent() {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let mut siblings_before: Vec<Node> = Vec::new();
+    let mut cursor = parent.walk();
+    for child in parent.children(&mut cursor) {
+        if child.id() == func_node.id() {
+            break;
+        }
+        siblings_before.push(child);
+    }
+    let mut attrs: Vec<String> = Vec::new();
+    for sib in siblings_before.iter().rev() {
+        if sib.kind() == "attribute_item" {
+            let text = std::str::from_utf8(&source[sib.byte_range()])
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            attrs.push(text);
+        } else {
+            break;
+        }
+    }
+    attrs.reverse();
+    attrs
+}
+
 fn count_comment_nodes(root: &Node) -> usize {
     let mut count = 0;
     let mut stack = vec![*root];

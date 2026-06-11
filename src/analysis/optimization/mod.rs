@@ -36,7 +36,7 @@ pub(super) fn detect_clone_in_loop(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -232,7 +232,7 @@ pub(super) fn detect_redundant_collect_iterate(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -309,7 +309,7 @@ pub(super) fn detect_repeated_map_lookup(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -405,7 +405,7 @@ pub(super) fn detect_vec_no_presize(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -523,7 +523,7 @@ pub(super) fn detect_sort_then_find(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -594,7 +594,7 @@ pub(super) fn detect_list_concat_in_loop(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -685,7 +685,7 @@ pub(super) fn detect_unbounded_recursion(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -700,11 +700,12 @@ pub(super) fn detect_unbounded_recursion(
             // *different* function with the same name (e.g. `other.process()`);
             // call_edges resolves method/trait dispatch, so we only count true
             // self-recursion.
-            match super::helpers::rust_fn_name_location(func)
+            let abs = ctx.resolve_path(&func.path);
+            match super::helpers::rust_name_location(&abs, func.span.start_line, &func.name)
                 .and_then(|loc| ctx.semantic.call_edges(&loc))
             {
                 Some(edges) => {
-                    let self_canon = std::fs::canonicalize(&func.path).ok();
+                    let self_canon = std::fs::canonicalize(&abs).ok().or(Some(abs.clone()));
                     let span = func.span.start_line as usize..=func.span.end_line as usize;
                     edges.outgoing.iter().any(|e| {
                         self_canon.as_deref() == Some(std::path::Path::new(&e.file))
@@ -789,7 +790,7 @@ pub(super) fn detect_vectorization_candidate(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -1058,7 +1059,7 @@ pub(super) fn detect_suggest_polars(
             continue;
         }
 
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -1141,7 +1142,7 @@ pub(super) fn detect_regex_recompile_in_loop(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -1240,7 +1241,7 @@ pub(super) fn detect_memoization_candidate(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -1369,7 +1370,7 @@ pub(super) fn detect_exception_for_control_flow(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -1418,7 +1419,7 @@ pub(super) fn detect_n_plus_one_query(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -1529,20 +1530,28 @@ pub(super) fn detect_sync_async_conflict(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
 
-        // Check if function is async
-        let is_async = func.is_async
-            || func.decorators.iter().any(|d| d.contains("async"))
-            || func.name.contains("async")
-            || src.lines().next().map_or(false, |first| {
-                let t = first.trim();
-                t.starts_with("async ") || t.starts_with("async fn") || t.contains("async def")
-            })
-            || src.contains("await ");
+        // Check if function is async. For Rust, trust the parsed is_async flag
+        // (the parser correctly detects `async fn`). For other languages we fall
+        // back to source heuristics. Deliberately excludes name-contains("async")
+        // — a detector named detect_sync_async_conflict is not itself async — and
+        // src.contains("await ") for Rust files, where that string may appear in
+        // string literals inside the function body (causing self-flagging).
+        let is_async = if func.language == Language::Rust {
+            func.is_async
+        } else {
+            func.is_async
+                || func.decorators.iter().any(|d| d.contains("async"))
+                || src.lines().next().map_or(false, |first| {
+                    let t = first.trim();
+                    t.starts_with("async ") || t.starts_with("async fn") || t.contains("async def")
+                })
+                || src.contains("await ")
+        };
 
         if !is_async {
             continue;
@@ -1600,7 +1609,7 @@ pub(super) fn detect_repeated_format_in_loop(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -1725,7 +1734,7 @@ pub(super) fn detect_sleep_in_loop(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -1839,7 +1848,7 @@ pub(super) fn detect_generator_over_list(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -1891,7 +1900,7 @@ pub(super) fn detect_unnecessary_chain(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -1937,7 +1946,7 @@ pub(super) fn detect_large_list_in(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -1995,7 +2004,7 @@ pub(super) fn detect_dict_keys_iter(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -2039,7 +2048,7 @@ pub(super) fn detect_unclosed_resource(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -2131,7 +2140,7 @@ pub(super) fn detect_enumerate_vs_range_len(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -2171,7 +2180,7 @@ pub(super) fn detect_yield_from(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -2220,7 +2229,7 @@ pub(super) fn detect_append_in_loop_extend(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -2288,7 +2297,7 @@ pub(super) fn detect_double_with_statement(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -2335,7 +2344,7 @@ pub(super) fn detect_import_in_function(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -2412,7 +2421,7 @@ pub(super) fn detect_constant_condition(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -2472,7 +2481,7 @@ pub(super) fn detect_redundant_negation(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -2542,7 +2551,7 @@ pub fn detect_default_dict_pattern(ctx: &AnalysisContext, findings: &mut Vec<Fin
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -2604,7 +2613,7 @@ pub fn detect_empty_string_check(ctx: &AnalysisContext, findings: &mut Vec<Findi
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };

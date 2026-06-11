@@ -234,9 +234,29 @@ pub fn analyze_with(
 
     // ── Additional anti-patterns ─────────────────────────────────────────
 
-    // ── Check 29: Dead code (Critical) ────────────────────────────────────
+    // ── Check 29: Dead code + dead types (Critical / High) ────────────────
     if cat_ok("anti_patterns") && !skip("anti_patterns") && !skip("detect_dead_code") {
         anti_patterns::detect_dead_code(&ctx, &mut findings);
+    }
+
+    // ── Check 29c: Unused parameters (Low) ────────────────────────────────
+    if cat_ok("anti_patterns") && !skip("anti_patterns") && !skip("detect_unused_parameters") {
+        anti_patterns::detect_unused_parameters(&ctx, &mut findings);
+    }
+
+    // ── Check 29d: async without await (Medium) ───────────────────────────
+    if cat_ok("anti_patterns") && !skip("anti_patterns") && !skip("detect_async_without_await") {
+        anti_patterns::detect_async_without_await(&ctx, &mut findings);
+    }
+
+    // ── Check 29e: over-broad visibility (Low, semantic-only) ─────────────
+    if cat_ok("anti_patterns") && !skip("anti_patterns") && !skip("detect_overexposed_visibility") {
+        anti_patterns::detect_overexposed_visibility(&ctx, &mut findings);
+    }
+
+    // ── Check 29f: `&mut` never mutated (Medium, semantic-only) ───────────
+    if cat_ok("anti_patterns") && !skip("anti_patterns") && !skip("detect_unnecessary_mut_ref") {
+        anti_patterns::detect_unnecessary_mut_ref(&ctx, &mut findings);
     }
 
     // ── Check 30: Long parameter list (High) ──────────────────────────────
@@ -805,6 +825,11 @@ pub fn analyze_with(
         optimization::detect_empty_string_check(&ctx, &mut findings);
     }
 
+    // Collapse "dead code" + "passthrough" into one finding when the wrapper is
+    // itself dead — two Critical findings for the same function (delete it /
+    // inline it) is noise; one "dead passthrough, just delete it" says it all.
+    merge_dead_passthroughs(&mut findings);
+
     // Filter by category if specified
     if let Some(ref cat) = config.category {
         findings.retain(|f| f.kind.category() == cat.as_str());
@@ -813,4 +838,53 @@ pub fn analyze_with(
     // Sort: Critical first, then High, Medium, Low
     findings.sort_by_key(|f| f.tier);
     findings
+}
+
+/// When a passthrough wrapper has no callers, the dead-code check and the
+/// passthrough check both fire on it. Drop the redundant `DeadCode` finding and
+/// fold the fact into the surviving `Passthrough` description, so the report
+/// carries one actionable line instead of two.
+fn merge_dead_passthroughs(findings: &mut Vec<Finding>) {
+    use std::collections::HashSet;
+
+    // Wrapper name → its node index, for every passthrough finding.
+    let passthrough_wrappers: HashSet<(String, usize)> = findings
+        .iter()
+        .filter_map(|f| match &f.kind {
+            FindingKind::Passthrough { wrapper_name, .. } => {
+                f.node_indices.first().map(|&ni| (wrapper_name.clone(), ni))
+            }
+            _ => None,
+        })
+        .collect();
+
+    // Dead-code findings whose function is also a passthrough wrapper.
+    let mut dead_wrapper_names: HashSet<String> = HashSet::new();
+    findings.retain(|f| match &f.kind {
+        FindingKind::DeadCode { name, .. } => {
+            let is_dead_passthrough = f
+                .node_indices
+                .iter()
+                .any(|&ni| passthrough_wrappers.contains(&(name.clone(), ni)));
+            if is_dead_passthrough {
+                dead_wrapper_names.insert(name.clone());
+                false // drop the standalone dead-code finding
+            } else {
+                true
+            }
+        }
+        _ => true,
+    });
+
+    // Annotate the surviving passthrough findings that were dead.
+    for f in findings.iter_mut() {
+        if let FindingKind::Passthrough { wrapper_name, .. } = &f.kind
+            && dead_wrapper_names.contains(wrapper_name)
+            && !f.description.contains("dead")
+        {
+            f.description = format!(
+                "`{wrapper_name}` is a dead passthrough (no callers) — just delete it."
+            );
+        }
+    }
 }

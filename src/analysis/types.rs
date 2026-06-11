@@ -234,6 +234,39 @@ pub enum FindingKind {
     /// Function/method is never called by anything in the graph.
     DeadCode { name: String, file_path: String },
 
+    /// A type (struct/enum/trait/interface/class) is never referenced anywhere
+    /// — no usages in any body, field type, base list, or implementation.
+    DeadType {
+        name: String,
+        type_kind: String,
+        file_path: String,
+    },
+
+    /// A function parameter is never used in the function body.
+    UnusedParameter {
+        function_name: String,
+        param_name: String,
+    },
+
+    /// An `async` function that never awaits — forces callers to await for no
+    /// reason; it can usually be a plain function.
+    AsyncWithoutAwait { function_name: String },
+
+    /// A `pub` item whose every reference (per the language server) lives in its
+    /// own defining file — its visibility is broader than its actual use.
+    /// Semantic-only (needs a language server to resolve true references).
+    VisibilityTooBroad {
+        name: String,
+        symbol_kind: String,
+    },
+
+    /// A `&mut` parameter the function never uses mutably — should be `&`.
+    /// Semantic-only: the language server resolves whether each use mutates.
+    UnnecessaryMutRef {
+        function_name: String,
+        param_name: String,
+    },
+
     /// Function takes too many parameters (6+).
     LongParameterList {
         function_name: String,
@@ -968,6 +1001,11 @@ pub struct AnalysisConfig {
     pub skip_checks: Vec<String>,
     /// If set, only include findings from this category.
     pub category: Option<String>,
+    /// If set, restrict analysis to nodes whose file path contains one of these
+    /// substrings. Used by path-scoped `analyze_redundancy` calls so the O(n²)
+    /// similarity checks only do work touching the scoped files instead of
+    /// scanning the whole repo and filtering afterwards.
+    pub scope_paths: Option<Vec<String>>,
 }
 
 impl Default for AnalysisConfig {
@@ -986,6 +1024,7 @@ impl Default for AnalysisConfig {
             integration_test_module_threshold: 4,
             skip_checks: Vec::new(),
             category: None,
+            scope_paths: None,
         }
     }
 }
@@ -1021,6 +1060,11 @@ impl FindingKind {
             | FindingKind::FeatureEnvy { .. }
             | FindingKind::ShotgunSurgery { .. }
             | FindingKind::DeadCode { .. }
+            | FindingKind::DeadType { .. }
+            | FindingKind::UnusedParameter { .. }
+            | FindingKind::AsyncWithoutAwait { .. }
+            | FindingKind::VisibilityTooBroad { .. }
+            | FindingKind::UnnecessaryMutRef { .. }
             | FindingKind::LongParameterList { .. }
             | FindingKind::DataClump { .. }
             | FindingKind::MiddleMan { .. }
@@ -1187,6 +1231,11 @@ impl FindingKind {
             FindingKind::DetectedChainOfResponsibility { .. } => "COR=chain-of-resp",
             FindingKind::DetectedDependencyInjection { .. } => "DI=dep-injection",
             FindingKind::DeadCode { .. } => "DC=dead-code",
+            FindingKind::DeadType { .. } => "DT=dead-type",
+            FindingKind::UnusedParameter { .. } => "UPM=unused-param",
+            FindingKind::AsyncWithoutAwait { .. } => "ANA=async-no-await",
+            FindingKind::VisibilityTooBroad { .. } => "VTB=visibility-too-broad",
+            FindingKind::UnnecessaryMutRef { .. } => "UMR=unnecessary-mut-ref",
             FindingKind::LongParameterList { .. } => "LP=long-params",
             FindingKind::DataClump { .. } => "DK=data-clump",
             FindingKind::MiddleMan { .. } => "MM=middle-man",

@@ -27,6 +27,13 @@ pub struct CodeGraph {
     /// A `BTreeMap` keeps the JSON key order stable across saves.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) fingerprints: BTreeMap<usize, Vec<(u64, u32)>>,
+
+    /// Canonicalized absolute path of the indexed root. Node paths are stored
+    /// relative to it; semantic (LSP) checks resolve them to absolute through
+    /// this so queries don't depend on the process working directory. `None` for
+    /// graphs built before this field existed (they fall back to CWD).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<PathBuf>,
 }
 
 impl CodeGraph {
@@ -36,6 +43,7 @@ impl CodeGraph {
             path_index: HashMap::new(),
             name_index: HashMap::new(),
             fingerprints: BTreeMap::new(),
+            root: None,
         }
     }
 

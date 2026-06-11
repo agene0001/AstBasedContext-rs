@@ -1,22 +1,69 @@
 use std::collections::HashSet;
+use std::path::Path;
 
 use super::semantic::Location;
-use crate::types::node::FunctionData;
 
-/// Source position of a Rust function's *name* identifier — where a language
-/// server expects the cursor for references / call-hierarchy queries. The span
-/// starts at the declaration keyword (`pub`/`fn`), so locate the name after
-/// `fn ` on the declaration line.
-pub(super) fn rust_fn_name_location(func: &FunctionData) -> Option<Location> {
-    let content = std::fs::read_to_string(&func.path).ok()?;
-    let line = content.lines().nth(func.span.start_line.saturating_sub(1) as usize)?;
-    let after_fn = line.find("fn ")? + 3;
-    let col = line[after_fn..].find(&func.name)? + after_fn;
+/// Byte column of the first whole-word occurrence of `name` in `line` at or
+/// after `from`, or `None`. "Whole word" = not flanked by identifier characters,
+/// so `Config` doesn't match inside `ConfigBuilder`.
+pub(super) fn find_word(line: &str, name: &str, from: usize) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut search = from;
+    while let Some(rel) = line.get(search..)?.find(name) {
+        let at = search + rel;
+        let before_ok = at == 0 || !is_ident(bytes[at - 1]);
+        let after = at + name.len();
+        let after_ok = after >= bytes.len() || !is_ident(bytes[after]);
+        if before_ok && after_ok {
+            return Some(at);
+        }
+        search = at + 1;
+    }
+    None
+}
+
+/// Source position of a declaration's *name* identifier (function or type) — the
+/// cursor a language server expects for references / call-hierarchy queries. The
+/// span starts at the visibility/keyword, so the name is the first whole-word
+/// match of `name` on the declaration line. `path` must be absolute (resolve via
+/// `AnalysisContext::resolve_path`) so the `Location` is CWD-independent.
+pub(super) fn rust_name_location(path: &Path, start_line: u32, name: &str) -> Option<Location> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let line = content.lines().nth(start_line.saturating_sub(1) as usize)?;
+    let col = find_word(line, name, 0)?;
     Some(Location {
-        file: func.path.to_string_lossy().into_owned(),
-        line: func.span.start_line as usize,
+        file: path.to_string_lossy().into_owned(),
+        line: start_line as usize,
         col,
     })
+}
+
+/// Source position of a parameter's *binding* identifier in a Rust function
+/// signature: the first whole-word `param` followed (after optional spaces) by
+/// `:` within the few lines after the declaration. `path` must be absolute.
+/// Returns `None` if not found in the scanned window.
+pub(super) fn rust_param_location(path: &Path, start_line: u32, param: &str) -> Option<Location> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let start = start_line.saturating_sub(1) as usize;
+    // Signatures are short; scan a small window from the declaration line.
+    for (offset, line) in content.lines().skip(start).take(8).enumerate() {
+        let mut from = 0;
+        while let Some(col) = find_word(line, param, from) {
+            // The binding is `name :` — the next non-space char must be ':' and
+            // not '::' (a path) so we don't match a type segment.
+            let rest = line[col + param.len()..].trim_start();
+            if rest.starts_with(':') && !rest.starts_with("::") {
+                return Some(Location {
+                    file: path.to_string_lossy().into_owned(),
+                    line: start + offset + 1,
+                    col,
+                });
+            }
+            from = col + param.len();
+        }
+    }
+    None
 }
 
 /// Normalize an identifier to a canonical form for comparison.

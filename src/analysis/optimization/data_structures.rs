@@ -21,7 +21,7 @@ pub(crate) fn detect_vec_used_as_set(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -120,7 +120,7 @@ pub(crate) fn detect_vec_used_as_map(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -176,7 +176,7 @@ pub(crate) fn detect_linear_search_in_loop(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -307,7 +307,7 @@ pub(crate) fn detect_string_concat_in_loop(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -410,7 +410,7 @@ pub(crate) fn detect_sorted_vec_for_lookup(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -466,7 +466,7 @@ pub(crate) fn detect_nested_loop_lookup(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -562,7 +562,7 @@ pub(crate) fn detect_hashmap_sequential_keys(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
@@ -655,7 +655,7 @@ pub(crate) fn detect_excessive_collect_iterate(
             GraphNode::Function(f) => f,
             _ => continue,
         };
-        let src = match &func.source {
+        let src = match ctx.masked_source(idx) {
             Some(s) => s,
             None => continue,
         };
