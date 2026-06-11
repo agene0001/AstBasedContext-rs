@@ -886,5 +886,11 @@ unsafe fn libc_signal<F: Fn() + Send + Sync + 'static>(sig: i32, handler: F) {
         }
     }
 
-    libc::signal(sig, signal_handler as libc::sighandler_t);
+    // SAFETY: registering a signal handler. `signal_handler` is an `extern "C"`
+    // function with the correct `sighandler_t` signature; cast through a pointer
+    // (not a direct fn-item→integer cast) per the compiler lint. The explicit
+    // `unsafe` block is required under edition 2024.
+    unsafe {
+        libc::signal(sig, signal_handler as *const () as libc::sighandler_t);
+    }
 }
